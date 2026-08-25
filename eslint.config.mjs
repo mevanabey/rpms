@@ -16,6 +16,7 @@ const eslintConfig = defineConfig([
     // `.nosync` so iCloud skips them (see next.config.ts and .npmrc); ESLint
     // only ignores `node_modules` by default, so the store must be listed
     // explicitly or `eslint .` walks every installed package.
+    ".next/**",
     ".next.nosync/**",
     ".pnpm.nosync/**",
   ]),
