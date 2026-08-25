@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   CalendarDays,
@@ -19,6 +20,7 @@ import { toast } from "sonner";
 
 import { MoneyDisplay } from "@/components/app/money-display";
 import { SectionHeader } from "@/components/app/section-header";
+import { SortableHeader, type SortDir } from "@/components/data-table/sortable-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -77,10 +79,10 @@ import { useDemoStore } from "@/lib/demo/store";
 import { scopeByLease } from "@/lib/demo/scope";
 import {
   useCurrentUser,
-  useRentPayments,
   useRentReminders,
 } from "@/lib/demo/use-store";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
+import { markRentPaidAction, unmarkRentPaidAction } from "@/server/actions";
 
 export interface RentRow {
   entry: LedgerEntry;
@@ -88,11 +90,24 @@ export interface RentRow {
   property?: Property;
   tenant?: Party;
   landlord?: Party;
+  advisor?: Party;
 }
 
 const TODAY = "2026-05-13";
 
+/** Window (days) used by the "Ending soon" tab to flag rent on expiring leases. */
+const ENDING_SOON_DAYS = 90;
+
 type Bucket = "overdue" | "due_soon" | "upcoming" | "paid";
+type TabKey = Bucket | "ending_soon" | "all";
+
+function isEndingSoon(row: RentRow): boolean {
+  const end = row.lease?.endDate;
+  if (!end) return false;
+  if (end < TODAY) return false;
+  const days = (new Date(end).getTime() - new Date(TODAY).getTime()) / 86400000;
+  return days <= ENDING_SOON_DAYS;
+}
 
 function bucketize(row: RentRow, paidLocally: boolean): Bucket {
   if (paidLocally || row.entry.paidDate) return "paid";
@@ -121,21 +136,97 @@ const BUCKET_TONE: Record<Bucket, string> = {
     "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-900",
 };
 
-type ColumnKey = "due" | "tenant" | "property" | "amount" | "status";
+type ColumnKey =
+  | "due"
+  | "tenant"
+  | "property"
+  | "amount"
+  | "status"
+  | "type"
+  | "units"
+  | "lessor"
+  | "advisor"
+  | "cadence"
+  | "leaseStart"
+  | "leaseEnd";
 
 interface ColumnDef {
   key: ColumnKey;
   label: string;
   className?: string;
+  cellClassName?: string;
+  align?: "left" | "right";
+  /** Hidden by default — user can toggle via the Columns menu. */
+  defaultHidden?: boolean;
 }
 
 const COLUMNS: ColumnDef[] = [
-  { key: "due", label: "Due" },
+  { key: "due", label: "Due", cellClassName: "tabular-nums" },
   { key: "tenant", label: "Tenant" },
   { key: "property", label: "Property" },
-  { key: "amount", label: "Amount", className: "text-right" },
+  {
+    key: "amount",
+    label: "Amount",
+    className: "text-right",
+    cellClassName: "text-right tabular-nums",
+    align: "right",
+  },
   { key: "status", label: "Status" },
+  { key: "type", label: "Type", defaultHidden: true },
+  { key: "units", label: "Units", defaultHidden: true },
+  { key: "lessor", label: "Landlord", defaultHidden: true },
+  { key: "advisor", label: "Advisor", defaultHidden: true },
+  { key: "cadence", label: "Payment frequency", defaultHidden: true },
+  { key: "leaseStart", label: "Lease start", defaultHidden: true, cellClassName: "tabular-nums" },
+  { key: "leaseEnd", label: "Lease end", defaultHidden: true, cellClassName: "tabular-nums" },
 ];
+
+const DEFAULT_HIDDEN: ReadonlySet<ColumnKey> = new Set(
+  COLUMNS.filter((c) => c.defaultHidden).map((c) => c.key),
+);
+
+const BUCKET_ORDER: Record<Bucket, number> = {
+  overdue: 0,
+  due_soon: 1,
+  upcoming: 2,
+  paid: 3,
+};
+
+function compareRentRows(
+  key: ColumnKey,
+  a: { row: RentRow; bucket: Bucket },
+  b: { row: RentRow; bucket: Bucket },
+): number {
+  switch (key) {
+    case "due":
+      return a.row.entry.dueDate.localeCompare(b.row.entry.dueDate);
+    case "tenant":
+      return (a.row.tenant?.displayName ?? "").localeCompare(b.row.tenant?.displayName ?? "");
+    case "property":
+      return (a.row.property?.name ?? "").localeCompare(b.row.property?.name ?? "");
+    case "amount":
+      return a.row.entry.amount.amount - b.row.entry.amount.amount;
+    case "status":
+      return BUCKET_ORDER[a.bucket] - BUCKET_ORDER[b.bucket];
+    case "type": {
+      const av = `${a.row.lease?.kind ?? ""}·${a.row.lease?.purpose ?? ""}`;
+      const bv = `${b.row.lease?.kind ?? ""}·${b.row.lease?.purpose ?? ""}`;
+      return av.localeCompare(bv);
+    }
+    case "units":
+      return (a.row.lease?.unitIds.length ?? 0) - (b.row.lease?.unitIds.length ?? 0);
+    case "lessor":
+      return (a.row.landlord?.displayName ?? "").localeCompare(b.row.landlord?.displayName ?? "");
+    case "advisor":
+      return (a.row.advisor?.displayName ?? "").localeCompare(b.row.advisor?.displayName ?? "");
+    case "cadence":
+      return (a.row.lease?.paymentCadence ?? "").localeCompare(b.row.lease?.paymentCadence ?? "");
+    case "leaseStart":
+      return (a.row.lease?.startDate ?? "").localeCompare(b.row.lease?.startDate ?? "");
+    case "leaseEnd":
+      return (a.row.lease?.endDate ?? "").localeCompare(b.row.lease?.endDate ?? "");
+  }
+}
 
 const CURRENCIES: Currency[] = ["LKR", "USD"];
 const CADENCES: PaymentCadence[] = ["monthly", "quarterly", "biannual"];
@@ -182,12 +273,11 @@ export function RentBoard({
   showHeader?: boolean;
   showSummary?: boolean;
 }) {
+  const router = useRouter();
   const user = useCurrentUser();
-  const rentPayments = useRentPayments();
   const rentReminders = useRentReminders();
-  const markRentPaid = useDemoStore((s) => s.markRentPaid);
   const sendRentReminder = useDemoStore((s) => s.sendRentReminder);
-  const unmarkRentPaid = useDemoStore((s) => s.unmarkRentPaid);
+  const [, startTransition] = useTransition();
 
   const scoped = useMemo(
     () => scopeByLease(user, rows, (r) => r.entry.leaseId),
@@ -196,13 +286,28 @@ export function RentBoard({
 
   // Persistent state ----------------------------------------------------
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<Bucket | "all">("overdue");
+  const [tab, setTab] = useState<TabKey>("overdue");
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [hidden, setHidden] = useState<Set<ColumnKey>>(new Set());
+  const [hidden, setHidden] = useState<Set<ColumnKey>>(() => new Set(DEFAULT_HIDDEN));
+  const [sort, setSort] = useState<{ key: ColumnKey; dir: SortDir } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState<number>(20);
+
+  const toggleSort = (key: ColumnKey) => {
+    setSort((cur) => {
+      if (!cur || cur.key !== key) return { key, dir: "asc" };
+      if (cur.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  };
+
+  const hiddenIsDefault = useMemo(() => {
+    if (hidden.size !== DEFAULT_HIDDEN.size) return false;
+    for (const k of hidden) if (!DEFAULT_HIDDEN.has(k)) return false;
+    return true;
+  }, [hidden]);
 
   const properties = useMemo(() => {
     const map = new Map<string, Property>();
@@ -213,17 +318,23 @@ export function RentBoard({
   // Derive --------------------------------------------------------------
   const enriched = useMemo(() => {
     return scoped.map((row) => {
-      const overlay = rentPayments[row.entry.id];
-      const bucket = bucketize(row, !!overlay);
+      const bucket = bucketize(row, false);
       const lastReminder = rentReminders.find((r) => r.ledgerEntryId === row.entry.id);
+      // `overlay` retained as a stable shape for downstream UI that conditioned
+      // on a local-only mark-paid; with Supabase writes we no longer use it.
+      const overlay = undefined as undefined;
       return { row, bucket, overlay, lastReminder };
     });
-  }, [scoped, rentPayments, rentReminders]);
+  }, [scoped, rentReminders]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     return enriched.filter(({ row, bucket, lastReminder }) => {
-      if (tab !== "all" && bucket !== tab) return false;
+      if (tab === "ending_soon") {
+        if (!isEndingSoon(row)) return false;
+      } else if (tab !== "all" && bucket !== tab) {
+        return false;
+      }
       if (filters.currencies.size > 0 && !filters.currencies.has(row.entry.amount.currency)) return false;
       if (filters.cadences.size > 0) {
         const cadence = row.lease?.paymentCadence;
@@ -261,9 +372,17 @@ export function RentBoard({
     return acc;
   }, [enriched]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const sorted = useMemo(() => {
+    if (!sort) return filtered;
+    const arr = [...filtered];
+    arr.sort((a, b) => compareRentRows(sort.key, a, b));
+    if (sort.dir === "desc") arr.reverse();
+    return arr;
+  }, [filtered, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage = Math.min(page, totalPages - 1);
-  const pageRows = filtered.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const pageRows = sorted.slice(safePage * pageSize, (safePage + 1) * pageSize);
 
   const pageIds = pageRows.map((r) => r.row.entry.id);
   const allOnPageSelected =
@@ -297,25 +416,37 @@ export function RentBoard({
     if (!user) return;
     const method =
       row.entry.amount.currency === "USD" ? "usd_transfer" : "lkr_transfer";
-    markRentPaid(
-      row.entry.id,
-      {
+    startTransition(async () => {
+      const result = await markRentPaidAction(row.entry.id, {
         paidDate: TODAY,
-        by: user.name,
-        method,
+        paymentMethod: method,
         reference: `manual-${row.entry.id}`,
-      },
-      {
-        leaseId: row.entry.leaseId,
-        amount: row.entry.amount,
-        tenantName: row.tenant?.displayName,
-      },
-    );
-    toast.success("Rent marked as paid", {
-      description: `${row.tenant?.displayName ?? row.entry.leaseId} · ${formatCurrency(
-        row.entry.amount.amount,
-        { currency: row.entry.amount.currency, noDecimals: true },
-      )}`,
+      });
+      if (!result.ok) {
+        toast.error("Could not mark paid", { description: result.error });
+        return;
+      }
+      toast.success("Rent marked as paid", {
+        description: `${row.tenant?.displayName ?? row.entry.leaseId} · ${formatCurrency(
+          row.entry.amount.amount,
+          { currency: row.entry.amount.currency, noDecimals: true },
+        )}`,
+      });
+      router.refresh();
+    });
+  };
+
+  const handleUnmarkPaid = (row: RentRow) => {
+    startTransition(async () => {
+      const result = await unmarkRentPaidAction(row.entry.id);
+      if (!result.ok) {
+        toast.error("Could not undo", { description: result.error });
+        return;
+      }
+      toast.success("Undid mark-paid", {
+        description: `${row.tenant?.displayName ?? row.entry.leaseId}`,
+      });
+      router.refresh();
     });
   };
 
@@ -422,7 +553,8 @@ export function RentBoard({
   const resetAll = () => {
     setFilters(EMPTY_FILTERS);
     setSearch("");
-    setHidden(new Set());
+    setHidden(new Set(DEFAULT_HIDDEN));
+    setSort(null);
     clearSelection();
   };
 
@@ -532,7 +664,7 @@ export function RentBoard({
                   }
                 />
                 <FilterGroup
-                  label="Cadence"
+                  label="Payment frequency"
                   values={CADENCES}
                   active={filters.cadences}
                   onToggle={(v) =>
@@ -633,7 +765,7 @@ export function RentBoard({
         <Tabs
           value={tab}
           onValueChange={(v) => {
-            setTab(v as Bucket | "all");
+            setTab(v as TabKey);
             setPage(0);
           }}
         >
@@ -642,6 +774,7 @@ export function RentBoard({
             <TabsTrigger value="due_soon">Due soon</TabsTrigger>
             <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
             <TabsTrigger value="paid">Paid</TabsTrigger>
+            <TabsTrigger value="ending_soon">Lease Ending soon</TabsTrigger>
             <TabsTrigger value="all">All</TabsTrigger>
           </TabsList>
           <TabsContent value={tab} />
@@ -668,7 +801,13 @@ export function RentBoard({
                     </TableHead>
                     {visibleColumns.map((c) => (
                       <TableHead key={c.key} className={c.className}>
-                        {c.label}
+                        <SortableHeader
+                          label={c.label}
+                          align={c.align}
+                          active={sort?.key === c.key}
+                          direction={sort?.key === c.key ? sort.dir : "asc"}
+                          onToggle={() => toggleSort(c.key)}
+                        />
                       </TableHead>
                     ))}
                     <TableHead className="sticky right-0 z-20 w-[210px] bg-muted text-right shadow-[-4px_0_8px_-4px_rgb(0_0_0_/_0.08)]">
@@ -693,13 +832,15 @@ export function RentBoard({
                       <TableRow
                         key={row.entry.id}
                         data-state={isSelected ? "selected" : undefined}
-                        className="group"
+                        className="group cursor-pointer"
+                        onClick={() => router.push(`/leases/${row.entry.leaseId}`)}
                       >
                         <TableCell
                           className={cn(
                             "sticky left-0 z-10 w-10 text-center transition-colors",
                             isSelected ? "bg-muted" : "bg-card group-hover:bg-muted/50",
                           )}
+                          onClick={(e) => e.stopPropagation()}
                         >
                           <Checkbox
                             checked={isSelected}
@@ -708,13 +849,7 @@ export function RentBoard({
                           />
                         </TableCell>
                         {visibleColumns.map((c) => (
-                          <TableCell
-                            key={c.key}
-                            className={cn(
-                              c.key === "amount" && "text-right tabular-nums",
-                              c.key === "due" && "tabular-nums",
-                            )}
-                          >
+                          <TableCell key={c.key} className={c.cellClassName}>
                             {renderCell(c.key, row, bucket, overlay, lastReminder)}
                           </TableCell>
                         ))}
@@ -723,6 +858,7 @@ export function RentBoard({
                             "sticky right-0 z-10 w-[210px] text-right transition-colors shadow-[-4px_0_8px_-4px_rgb(0_0_0_/_0.08)]",
                             isSelected ? "bg-muted" : "bg-card group-hover:bg-muted/50",
                           )}
+                          onClick={(e) => e.stopPropagation()}
                         >
                           <div className="inline-flex gap-2">
                             <Button
@@ -737,13 +873,9 @@ export function RentBoard({
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => unmarkRentPaid(row.entry.id)}
-                                disabled={!overlay}
-                                title={
-                                  overlay
-                                    ? "Undo manual mark-paid"
-                                    : "This entry is paid in the source ledger"
-                                }
+                                onClick={() => handleUnmarkPaid(row)}
+                                disabled={!row.entry.paidDate}
+                                title="Undo mark-paid"
                               >
                                 <Receipt className="size-3.5" /> Undo
                               </Button>
@@ -768,7 +900,7 @@ export function RentBoard({
           <div className="flex items-center gap-2 text-muted-foreground text-xs">
             <CalendarDays className="size-3.5" />
             Page {safePage + 1} of {totalPages} · {filtered.length} rows
-            {(activeFilterCount > 0 || search || hidden.size > 0) && (
+            {(activeFilterCount > 0 || search || !hiddenIsDefault || sort) && (
               <Button variant="ghost" size="sm" className="h-6" onClick={resetAll}>
                 <RotateCcw className="size-3" /> Reset view
               </Button>
@@ -820,9 +952,10 @@ function renderCell(
   key: ColumnKey,
   row: RentRow,
   bucket: Bucket,
-  overlay: ReturnType<typeof useRentPayments>[string] | undefined,
+  _overlay: undefined,
   lastReminder: ReturnType<typeof useRentReminders>[number] | undefined,
 ): React.ReactNode {
+  void _overlay;
   switch (key) {
     case "due":
       return (
@@ -837,14 +970,7 @@ function renderCell(
         </>
       );
     case "tenant":
-      return (
-        <>
-          <div className="font-medium">{row.tenant?.displayName ?? "—"}</div>
-          <div className="font-mono text-muted-foreground text-xs">
-            {row.entry.leaseId}
-          </div>
-        </>
-      );
+      return <div className="font-medium">{row.tenant?.displayName ?? "—"}</div>;
     case "property":
       return row.property?.name ?? "—";
     case "amount":
@@ -855,13 +981,39 @@ function renderCell(
           <Badge variant="outline" className={BUCKET_TONE[bucket]}>
             {BUCKET_LABEL[bucket]}
           </Badge>
-          {overlay && (
+          {row.entry.paidDate && (
             <div className="mt-0.5 text-muted-foreground text-[11px]">
-              Paid {formatDate(overlay.paidDate)} · {overlay.by}
+              Paid {formatDate(row.entry.paidDate)}
             </div>
           )}
         </>
       );
+    case "type":
+      return row.lease ? (
+        <span className="text-xs capitalize text-muted-foreground">
+          {row.lease.kind} · {row.lease.purpose}
+        </span>
+      ) : (
+        "—"
+      );
+    case "units":
+      return row.lease ? (
+        <Badge variant="outline" className="font-mono text-xs">
+          {row.lease.unitIds.length}
+        </Badge>
+      ) : (
+        "—"
+      );
+    case "lessor":
+      return row.landlord?.displayName ?? "—";
+    case "advisor":
+      return row.advisor?.displayName ?? "—";
+    case "cadence":
+      return row.lease?.paymentCadence ?? "—";
+    case "leaseStart":
+      return row.lease ? formatDate(row.lease.startDate) : "—";
+    case "leaseEnd":
+      return row.lease ? formatDate(row.lease.endDate) : "—";
   }
 }
 

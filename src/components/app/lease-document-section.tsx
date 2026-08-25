@@ -1,9 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import dynamic from "next/dynamic";
+import { useMemo, useState, useTransition } from "react";
 
-import { Download, FileCheck2, Send } from "lucide-react";
+import { ChevronDown, Download, FileCheck2, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { SectionHeader } from "@/components/app/section-header";
@@ -18,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
+import { LeaseDocumentPreview } from "@/components/app/lease-document-preview";
 import type { Lease, Party, Property, Unit } from "@/core/types";
 import { partyMap } from "@/lib/lookup";
 import { useDemoStore } from "@/lib/demo/store";
@@ -27,30 +26,27 @@ import {
   useLeaseDocSettings,
   useLeaseSignatures,
 } from "@/lib/demo/use-store";
-import { LeaseDocument } from "@/templates/leases/lease-document";
+import { cn } from "@/lib/utils";
 import { fromLease } from "@/templates/leases/lease-document-data";
-
-const PDFViewer = dynamic(
-  () => import("@react-pdf/renderer").then((m) => m.PDFViewer),
-  { ssr: false, loading: () => <PdfFallback /> },
-);
-
-const PDFDownloadLink = dynamic(
-  () => import("@react-pdf/renderer").then((m) => m.PDFDownloadLink),
-  { ssr: false },
-);
+import { downloadLeaseAgreement } from "@/templates/leases/lease-template-render";
 
 export function LeaseDocumentSection({
   lease,
   parties,
   property,
   units,
+  defaultOpen = false,
 }: {
   lease: Lease;
   parties: Party[];
   property?: Property;
   units: Unit[];
+  /** Hidden behind a toggle by default — the lease detail header already
+   *  carries a "View agreement" button, so the heavy preview shouldn't
+   *  expand on first paint. Defaults to false. */
+  defaultOpen?: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
   const user = useCurrentUser();
   const signatures = useLeaseSignatures(lease.id);
   const settings = useLeaseDocSettings();
@@ -83,8 +79,19 @@ export function LeaseDocumentSection({
 
   const [signerId, setSignerId] = useState<string>(signers[0]?.id ?? "");
   const activeSig = signatures[signerId];
+  const [downloading, startDownload] = useTransition();
 
-  const fileName = `${data.agreementTitle.replace(/\s+/g, "-").toLowerCase()}-${lease.id}.pdf`;
+  const handleDownload = () => {
+    startDownload(async () => {
+      try {
+        await downloadLeaseAgreement(data, settings);
+      } catch (err) {
+        toast.error("Could not generate lease document", {
+          description: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
+  };
 
   const handleSign = (dataUrl: string | null) => {
     if (!signerId || !user) return;
@@ -124,83 +131,77 @@ export function LeaseDocumentSection({
             <Badge variant="outline" className="font-mono text-[11px]">
               {signedCount} / {totalSigners} signed
             </Badge>
-            <PDFDownloadLink document={<LeaseDocument data={data} settings={settings} />} fileName={fileName}>
-              {({ loading }) => (
-                <Button size="sm" variant="outline" disabled={loading}>
-                  <Download className="size-3.5" />
-                  {loading ? "Preparing…" : "Download PDF"}
-                </Button>
-              )}
-            </PDFDownloadLink>
+            <Button size="sm" variant="outline" onClick={handleDownload} disabled={downloading}>
+              <Download className="size-3.5" />
+              {downloading ? "Preparing…" : "Download .docx"}
+            </Button>
             <Button size="sm" onClick={handleSend}>
               <Send className="size-3.5" /> Send for signature
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-expanded={open}
+              aria-label={open ? "Collapse lease document" : "Expand lease document"}
+              onClick={() => setOpen((v) => !v)}
+            >
+              <ChevronDown
+                className={cn("size-4 transition-transform", open && "rotate-180")}
+              />
             </Button>
           </div>
         }
       />
-      <Card>
-        <CardContent className="px-0">
-          <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr]">
-            <div className="border-b lg:border-r lg:border-b-0">
-              <PDFViewer
-                showToolbar={false}
-                style={{ width: "100%", height: 640, border: 0 }}
-              >
-                <LeaseDocument data={data} settings={settings} />
-              </PDFViewer>
-            </div>
-            <div className="flex flex-col gap-4 p-4">
-              <div className="flex flex-col gap-1">
-                <h3 className="flex items-center gap-2 font-medium text-sm">
-                  <FileCheck2 className="size-4" /> Sign as
-                </h3>
-                <p className="text-muted-foreground text-xs">
-                  Drop a signature and it lands on the PDF instantly. In production
-                  this is replaced by DropboxSign / DocuSign.
-                </p>
+      {open && (
+        <Card>
+          <CardContent className="px-0">
+            <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr]">
+              <div className="border-b lg:border-r lg:border-b-0">
+                <LeaseDocumentPreview data={data} settings={settings} className="h-[640px]" />
               </div>
-              <Select value={signerId} onValueChange={setSignerId}>
-                <SelectTrigger size="sm">
-                  <SelectValue placeholder="Choose a party…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {signers.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.label}
-                      <span className="ml-2 text-muted-foreground text-[10px] uppercase">
-                        {s.role}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <SignaturePad
-                width={360}
-                height={130}
-                initialDataUrl={activeSig?.dataUrl}
-                onChange={handleSign}
-                disabled={!signerId}
-              />
-              {activeSig && (
-                <p className="text-muted-foreground text-[11px]">
-                  Signed {new Date(activeSig.signedAt).toLocaleString("en-GB")} ·{" "}
-                  {activeSig.by}
-                </p>
-              )}
+              <div className="flex flex-col gap-4 p-4">
+                <div className="flex flex-col gap-1">
+                  <h3 className="flex items-center gap-2 font-medium text-sm">
+                    <FileCheck2 className="size-4" /> Sign as
+                  </h3>
+                  <p className="text-muted-foreground text-xs">
+                    Drop a signature and it lands on the PDF instantly. In production
+                    this is replaced by DropboxSign / DocuSign.
+                  </p>
+                </div>
+                <Select value={signerId} onValueChange={setSignerId}>
+                  <SelectTrigger size="sm">
+                    <SelectValue placeholder="Choose a party…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {signers.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.label}
+                        <span className="ml-2 text-muted-foreground text-[10px] uppercase">
+                          {s.role}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <SignaturePad
+                  width={360}
+                  height={130}
+                  initialDataUrl={activeSig?.dataUrl}
+                  onChange={handleSign}
+                  disabled={!signerId}
+                />
+                {activeSig && (
+                  <p className="text-muted-foreground text-[11px]">
+                    Signed {new Date(activeSig.signedAt).toLocaleString("en-GB")} ·{" "}
+                    {activeSig.by}
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </section>
-  );
-}
-
-function PdfFallback() {
-  return (
-    <div className="flex h-[640px] flex-col gap-3 p-6">
-      <Skeleton className="h-6 w-1/3" />
-      <Skeleton className="h-4 w-2/3" />
-      <Skeleton className="mt-4 h-full w-full" />
-    </div>
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
 
 import { CheckCircle2, Eye, FileText, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -19,18 +18,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { LeaseDocumentPreview } from "@/components/app/lease-document-preview";
 import { useDemoStore } from "@/lib/demo/store";
 import { useLeaseDocSettings } from "@/lib/demo/use-store";
 import type { LeaseDocSettings } from "@/lib/demo/types";
-import { LeaseDocument } from "@/templates/leases/lease-document";
 import type { LeaseDocumentData } from "@/templates/leases/lease-document-data";
-
-const PDFViewer = dynamic(
-  () => import("@react-pdf/renderer").then((m) => m.PDFViewer),
-  { ssr: false, loading: () => <Skeleton className="h-[640px] w-full" /> },
-);
 
 // Deterministic sample data — never touches Date.now() at module scope.
 const SAMPLE_DATA: LeaseDocumentData = {
@@ -139,7 +132,7 @@ export function LeaseDocumentTemplateCard() {
           <div className="flex flex-wrap items-center gap-2">
             <FileText className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="font-medium text-sm">
-              Auto-generated lease PDF
+              Auto-generated lease document
             </span>
             {isCustomized ? (
               <Badge
@@ -154,11 +147,11 @@ export function LeaseDocumentTemplateCard() {
               </Badge>
             )}
             <Badge variant="outline" className="font-mono text-[10px]">
-              @react-pdf/renderer
+              .docx (Word)
             </Badge>
           </div>
           <div className="mt-1 font-mono text-muted-foreground text-xs">
-            src/templates/leases/lease-document.tsx
+            public/lease-templates/{`{`}residential, commercial{`}`}.docx
           </div>
           <div className="mt-2 line-clamp-3 text-muted-foreground text-xs">
             The lease document every party sees, signs, and downloads.
@@ -194,14 +187,7 @@ function PreviewDialog() {
           </DialogDescription>
         </DialogHeader>
         <div className="overflow-hidden rounded-md border">
-          {open && (
-            <PDFViewer
-              showToolbar={false}
-              style={{ width: "100%", height: 640, border: 0 }}
-            >
-              <LeaseDocument data={SAMPLE_DATA} settings={settings} />
-            </PDFViewer>
-          )}
+          {open && <LeaseDocumentPreview data={SAMPLE_DATA} settings={settings} className="h-[640px]" />}
         </div>
       </DialogContent>
     </Dialog>

@@ -133,6 +133,8 @@ export interface LeaseClauses {
   serviceChargesNote?: string;
   acServiceBy?: ResponsibleParty;
   acServiceNote?: string;
+  /** "every 3 months", "quarterly", … — checklist row "A/C service period". */
+  acServicePeriod?: string;
   /** Below this LKR amount the lessee handles repairs themselves. */
   minorRepairsThreshold?: Money;
   /** Verbatim clause text (cleanliness / wear-and-tear / sanitary state). */
@@ -148,6 +150,37 @@ export interface LeaseClauses {
   sublettingNote?: string;
   depositRefundTo?: DepositRefundTo;
   depositRefundOther?: string;
+  /** Money form of the "Advance payment" checklist row when the cell
+   *  carries an amount (e.g. "per unit - 5,250 Two Units- 10,500") rather
+   *  than a month count. `lease.advanceMonths` keeps the count-based form
+   *  for legacy / commercial checklists; this field carries the figure for
+   *  residential sub-lease checklists. */
+  advancePaymentAmount?: Money;
+  /** Checklist "Locking period" — kept as raw text because the cell often
+   *  reads "N/A" / "not applicable" and the parsed `lockInEndDate` (lease
+   *  body) is the structured equivalent when present. */
+  lockInPeriodText?: string;
+  /** Checklist "Additional Charges (if any)" — verbatim text or "N/A". */
+  additionalCharges?: string;
+  /** Checklist "Lessee's Current Employer". */
+  lesseeEmployer?: string;
+  /** Checklist "Applicability of WHT and any other taxes" — parsed side. */
+  taxApplicabilityBy?: ResponsibleParty;
+  /** Same field — raw text so "Lessee", "Both shared", etc. survive verbatim. */
+  taxApplicabilityNote?: string;
+  /** Checklist "If paid in USD how exchange rate is taken" — "Mid-rate", … */
+  fxBasis?: string;
+  /** Checklist "First exchange rate taken (LKR)" — LKR per USD as a number. */
+  firstFxRate?: number;
+  /** Verbatim FX rate cell (carries the "as 2026.04.27" suffix). */
+  firstFxRateNote?: string;
+  /** Checklist "CTP Lawyer Name" — kept as a name for display; the importer
+   *  also creates a Party with the right `*_lawyer` role. */
+  ctpLawyerName?: string;
+  /** Free-text fallback when "Legal fees" / "Stamp duty" rows don't parse as
+   *  money (e.g. "Either party will bear its own legal expenses", "N/A"). */
+  legalFeesNote?: string;
+  stampDutyNote?: string;
 }
 
 export interface Lease {
@@ -181,7 +214,29 @@ export interface Lease {
   additionalRoles?: LeasePartyRole[];
   parentLeaseId?: string; // sub-leases reference their head lease
   importMeta?: Record<string, unknown>; // raw source row when migrated
+  /** Path inside the Supabase Storage `lease-documents` bucket where the
+   *  executed (signed) lease is stored. Set means signed + active. */
+  signedLeasePath?: string;
+  /** ISO timestamp when the signed lease was uploaded. */
+  signedLeaseUploadedAt?: string;
+  /** Pre-signing onboarding stage. `undefined` = Draft (Step 1).
+   *  Once the legal status is `active` the lease is at Step 5. */
+  onboardingStage?: OnboardingStage;
+  /** Draft (pre-signing) lease agreement stored in Supabase Storage. */
+  agreementPath?: string;
+  agreementGeneratedAt?: string;
+  lawyerEmailSentAt?: string;
+  advisorEmailSentAt?: string;
+  accountsEmailSentAt?: string;
 }
+
+/**
+ * Pipeline state between Draft and Active:
+ *   "agreement_ready" = Step 2 (Send Emails) — agreement generated/uploaded
+ *   "emails_sent"     = Step 3 (Advisor Approval) — both lawyer + advisor emailed
+ *   "at_accounts"     = Step 4 (Accounts) — accounts emailed
+ */
+export type OnboardingStage = "agreement_ready" | "emails_sent" | "at_accounts";
 
 // ───────────────────────────────────────────────────────── Money
 

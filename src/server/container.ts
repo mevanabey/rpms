@@ -3,30 +3,44 @@ import "server-only";
 import type { Backend } from "@/core/services";
 
 import { mockBackend } from "./adapters/mock";
+import { supabaseBackend } from "./adapters/supabase";
 
-type BackendKind = "mock" | "vercel" | "agentfabriq";
+const VALID_KINDS = ["mock", "supabase", "vercel", "agentfabriq"] as const;
+type BackendKind = (typeof VALID_KINDS)[number];
 
-const KIND = (process.env.BACKEND ?? "mock") as BackendKind;
+function resolveKind(): BackendKind {
+  const raw = (process.env.BACKEND ?? "mock").toLowerCase();
+  if ((VALID_KINDS as readonly string[]).includes(raw)) {
+    return raw as BackendKind;
+  }
+  throw new Error(
+    `Unknown BACKEND=${raw}. Expected one of: ${VALID_KINDS.join(", ")}.`,
+  );
+}
 
-let backend: Backend;
-
-switch (KIND) {
-  case "mock":
-    backend = mockBackend;
-    break;
-  case "vercel":
-    throw new Error(
-      "BACKEND=vercel adapter is Phase 02 — see src/server/adapters/vercel/README.md",
-    );
-  case "agentfabriq":
-    throw new Error(
-      "BACKEND=agentfabriq adapter is Phase 03 — see src/server/adapters/agent-fabriq/README.md",
-    );
-  default: {
-    const _exhaustive: never = KIND;
-    throw new Error(`Unknown BACKEND=${_exhaustive as string}`);
+function resolveBackend(): Backend {
+  const kind = resolveKind();
+  switch (kind) {
+    case "mock":
+      return mockBackend;
+    case "supabase":
+      return supabaseBackend;
+    case "vercel":
+      throw new Error(
+        "BACKEND=vercel adapter is Phase 02 — see src/server/adapters/vercel/README.md",
+      );
+    case "agentfabriq":
+      throw new Error(
+        "BACKEND=agentfabriq adapter is Phase 03 — see src/server/adapters/agent-fabriq/README.md",
+      );
+    default: {
+      const _exhaustive: never = kind;
+      throw new Error(`Unknown BACKEND=${_exhaustive as string}`);
+    }
   }
 }
+
+let cached: Backend | null = null;
 
 /**
  * Resolves the active backend. Server Components and server actions call this;
@@ -34,5 +48,6 @@ switch (KIND) {
  * the same across all phases.
  */
 export function getBackend(): Backend {
-  return backend;
+  if (!cached) cached = resolveBackend();
+  return cached;
 }

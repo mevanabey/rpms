@@ -12,6 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Relocated build output and pnpm virtual store. Both are renamed to
+    // `.nosync` so iCloud skips them (see next.config.ts and .npmrc); ESLint
+    // only ignores `node_modules` by default, so the store must be listed
+    // explicitly or `eslint .` walks every installed package.
+    ".next.nosync/**",
+    ".pnpm.nosync/**",
   ]),
   // Ports-and-adapters guard. The `core/` ring is the inner domain layer —
   // it must never depend on Next.js, IO libraries, framework SDKs, or the

@@ -56,7 +56,7 @@ export const TOURS: Tour[] = [
         content: (
           <div className="space-y-2">
             <p>
-              The activity feed is the system's <strong>working log</strong>.
+              The activity feed is the system’s <strong>working log</strong>.
               Reminders sent, payments matched, lifecycle events — every
               autonomous action shows up here.
             </p>
@@ -76,7 +76,7 @@ export const TOURS: Tour[] = [
         content: (
           <p>
             Some decisions need a human. The system collects them here so you
-            don't drown in email. Click <strong>Approve</strong> or{" "}
+            don’t drown in email. Click <strong>Approve</strong> or{" "}
             <strong>Reject</strong> — it remembers and learns to do it without
             you next time.
           </p>
@@ -180,7 +180,7 @@ export const TOURS: Tour[] = [
           <p>
             Every rent receipt, deposit, late fee, refund — recorded as a ledger
             entry. The system can match incoming bank advices automatically; if
-            it's unsure, it asks you.
+            it’s unsure, it asks you.
           </p>
         ),
         selector: '[data-onborda="sidebar-money"]',
@@ -241,7 +241,7 @@ export const TOURS: Tour[] = [
         title: "Watch it learn",
         content: (
           <p>
-            Each workflow's autonomy meter rises with every approval. When it
+            Each workflow’s autonomy meter rises with every approval. When it
             crosses the threshold, it graduates — and starts running without
             asking. You stay in charge of exceptions only.
           </p>

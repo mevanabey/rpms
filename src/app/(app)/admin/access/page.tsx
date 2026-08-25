@@ -235,7 +235,7 @@ function RbacPageInner() {
         <CardHeader>
           <CardTitle className="text-base">Per-role tools</CardTitle>
           <CardDescription>
-            Reset a role's permissions to the built-in default — useful after
+            Reset a role’s permissions to the built-in default — useful after
             experimenting with toggles.
           </CardDescription>
         </CardHeader>

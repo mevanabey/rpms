@@ -73,7 +73,7 @@ export function DashboardLive() {
             )}
           </CardTitle>
           <CardDescription>
-            The system asks for human input only when it's not yet trained.
+            The system asks for human input only when it’s not yet trained.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">

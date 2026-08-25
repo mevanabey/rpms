@@ -70,10 +70,10 @@ export default async function PropertyDetailPage({
                 <TableRow>
                   <TableHead>Lease</TableHead>
                   <TableHead>Kind</TableHead>
-                  <TableHead>Lessor</TableHead>
-                  <TableHead>Lessee</TableHead>
+                  <TableHead>Landlord</TableHead>
+                  <TableHead>Tenant</TableHead>
                   <TableHead>Term</TableHead>
-                  <TableHead className="text-right">Current rent</TableHead>
+                  <TableHead className="text-right">Monthly rental</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>

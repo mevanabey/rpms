@@ -38,6 +38,7 @@ interface DemoActions {
   // Lifecycle
   hydrate: () => void;
   resetDemo: () => void;
+  clearDemo: () => void;
   // Activity
   pushActivity: (activity: Omit<Activity, "id" | "ts" | "acked">) => Activity;
   ackActivity: (id: string) => void;
@@ -93,9 +94,12 @@ interface DemoActions {
   // Lease PDF template settings (operator-tweakable copy)
   setLeaseDocSettings: (patch: Partial<LeaseDocSettings>) => void;
   resetLeaseDocSettings: () => void;
-  // Identity / auth simulation
+  // Identity / auth
   loginAs: (userId: string) => void;
   logout: () => void;
+  /** Bridge for the server-resolved Supabase AppUser. Sets `currentUserId`
+   *  so existing client hooks keep working. Pass `null` on sign-out. */
+  setAuthUser: (user: { id: string } | null) => void;
   // RBAC editing
   addRoleDef: (def: Omit<RoleDefinition, "builtin">, initialPermissions: Resource[]) => RoleDefinition;
   updateRoleDef: (id: Role, patch: Partial<Omit<RoleDefinition, "id" | "builtin">>) => void;
@@ -149,6 +153,17 @@ export const useDemoStore = create<DemoStore>()(
 
       hydrate: () => set({ hydrated: true }),
       resetDemo: () => set({ ...buildInitialDemoState(), hydrated: true }),
+      clearDemo: () => {
+        const empty = buildInitialDemoState();
+        set({
+          ...empty,
+          activities: [],
+          approvals: [],
+          tickets: [],
+          rentReminders: [],
+          hydrated: true,
+        });
+      },
 
       pushActivity: (activity) => {
         const next: Activity = { ...activity, id: uid("act"), ts: Date.now(), acked: false };
@@ -452,6 +467,12 @@ export const useDemoStore = create<DemoStore>()(
       resetLeaseDocSettings: () => set({ leaseDocSettings: {} }),
       loginAs: (userId) => set({ currentUserId: userId }),
       logout: () => set({ currentUserId: null }),
+      setAuthUser: (user) =>
+        set((s) => {
+          const nextId = user?.id ?? null;
+          if (s.currentUserId === nextId) return s;
+          return { currentUserId: nextId };
+        }),
 
       addRoleDef: (def, initialPermissions) => {
         const newDef: RoleDefinition = { ...def, builtin: false };

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useTransition, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 
 import { Plus } from "lucide-react";
 import { useForm, type Resolver } from "react-hook-form";
@@ -27,8 +28,8 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import type { DraftProperty } from "@/lib/demo/types";
-import { useDemoStore } from "@/lib/demo/store";
+import type { Property } from "@/core/types";
+import { createPropertyAction } from "@/server/actions";
 
 const schema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -53,9 +54,11 @@ export function NewPropertyButton({
   onOpenChange?: (open: boolean) => void;
   trigger?: ReactNode;
   hideTrigger?: boolean;
-  onCreated?: (draft: DraftProperty) => void;
+  onCreated?: (property: Property) => void;
 } = {}) {
   const [internalOpen, setInternalOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
   const isControlled = openProp !== undefined;
   const open = isControlled ? openProp! : internalOpen;
   const setOpen = (next: boolean) => {
@@ -68,21 +71,28 @@ export function NewPropertyButton({
   });
 
   function onSubmit(values: Values) {
-    const store = useDemoStore.getState();
-    const draft = store.addDraftProperty(values);
-    // Activity log disabled — app simplified.
-    // store.pushActivity({
-    //   workflow: "system",
-    //   severity: "success",
-    //   title: `Property added · ${values.name}`,
-    //   body: `New property ${draft.id.slice(-6)} created in ${values.city}.`,
-    // });
-    toast.success("Property added", {
-      description: `${values.name} is now in your directory.`,
+    startTransition(async () => {
+      const result = await createPropertyAction({
+        name: values.name,
+        addressLine: values.addressLine,
+        city: values.city,
+        lotNo: values.lotNo || undefined,
+        planNo: values.planNo || undefined,
+        perches: values.perches,
+        asstNo: values.asstNo || undefined,
+      });
+      if (!result.ok) {
+        toast.error("Could not add property", { description: result.error });
+        return;
+      }
+      toast.success("Property added", {
+        description: `${result.data.name} is now in your directory.`,
+      });
+      form.reset({ name: "", addressLine: "", city: "Colombo" });
+      onCreated?.(result.data);
+      setOpen(false);
+      router.refresh();
     });
-    form.reset({ name: "", addressLine: "", city: "Colombo" });
-    onCreated?.(draft);
-    setOpen(false);
   }
 
   return (
@@ -207,8 +217,15 @@ export function NewPropertyButton({
               />
             </div>
             <SheetFooter className="px-0 pt-4">
-              <Button type="submit">Add property</Button>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              <Button type="submit" disabled={pending}>
+                {pending ? "Adding…" : "Add property"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOpen(false)}
+                disabled={pending}
+              >
                 Cancel
               </Button>
             </SheetFooter>

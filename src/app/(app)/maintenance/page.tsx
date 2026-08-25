@@ -42,7 +42,7 @@ export default async function MaintenancePage() {
         </CardHeader>
         <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
           <div className="rounded-lg border p-3">
-            <div className="text-muted-foreground text-xs">Lessee-side running maintenance</div>
+            <div className="text-muted-foreground text-xs">Tenant-side running maintenance</div>
             <div className="mt-1 font-medium">Rs. 75,000 per job, per floor</div>
             <div className="mt-1 text-muted-foreground text-xs">
               Tickets within this cap can auto-progress to vendor assignment without
@@ -50,8 +50,8 @@ export default async function MaintenancePage() {
             </div>
           </div>
           <div className="rounded-lg border p-3">
-            <div className="text-muted-foreground text-xs">Lessor-side structural repairs</div>
-            <div className="mt-1 font-medium">No cap; lessor's vendor</div>
+            <div className="text-muted-foreground text-xs">Landlord-side structural repairs</div>
+            <div className="mt-1 font-medium">No cap; landlord&apos;s vendor</div>
             <div className="mt-1 text-muted-foreground text-xs">
               Lift, generator, fire — categories handled by the building owner. The
               compliance scheduler raises these automatically.

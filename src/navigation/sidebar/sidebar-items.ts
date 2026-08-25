@@ -1,13 +1,16 @@
 import {
   Building2,
   ClipboardCheck,
+  Database,
   FilePlus2,
   FileSignature,
   FileText,
   LayoutDashboard,
   type LucideIcon,
   Receipt,
+  Settings,
   ShieldAlert,
+  Sparkles,
   UploadCloud,
   Users,
 } from "lucide-react";
@@ -57,14 +60,6 @@ const rpmsNav: NavGroup[] = [
     ],
   },
   {
-    id: 2,
-    items: [
-      { title: "Properties", url: "/properties", icon: Building2, requires: ["properties:read"] },
-      { title: "Parties", url: "/parties", icon: Users, requires: ["parties:read"] },
-      // { title: "Units", url: "/units", icon: Gauge, requires: ["units:read"] },
-    ],
-  },
-  {
     id: 3,
     label: "Leases",
     items: [
@@ -75,9 +70,13 @@ const rpmsNav: NavGroup[] = [
   },
   {
     id: 4,
-    label: "Rent",
+    label: "Other",
     items: [
       { title: "Rent", url: "/rent", icon: Receipt, requires: ["payments:read"] },
+      { title: "Properties", url: "/properties", icon: Building2, requires: ["properties:read"] },
+      { title: "Parties", url: "/parties", icon: Users, requires: ["parties:read"] },
+      { title: "Checklist upload", url: "/admin/checklists", icon: Sparkles, requires: ["admin:import"] },
+      // { title: "Units", url: "/units", icon: Gauge, requires: ["units:read"] },
     ],
   },
   // {
@@ -126,13 +125,20 @@ const rpmsNav: NavGroup[] = [
   // },
   {
     id: 7,
-    label: "Settings",
     items: [
-      { title: "Templates", url: "/admin/templates", icon: FileText, requires: ["admin:templates"] },
-      { title: "Import (XLSX)", url: "/admin/import", icon: UploadCloud, requires: ["admin:import"] },
-      // { title: "Workflows", url: "/admin/workflows", icon: ClipboardCheck, requires: ["admin:workflows"] },
-      { title: "Users", url: "/admin/users", icon: Users, requires: ["admin:users"] },
-      { title: "Access", url: "/admin/access", icon: ShieldAlert, requires: ["admin:rbac"] },
+      {
+        title: "Settings",
+        url: "#",
+        icon: Settings,
+        subItems: [
+          { title: "Templates", url: "/admin/templates", icon: FileText, requires: ["admin:templates"] },
+          { title: "Import (XLSX)", url: "/admin/import", icon: UploadCloud, requires: ["admin:import"] },
+          // { title: "Workflows", url: "/admin/workflows", icon: ClipboardCheck, requires: ["admin:workflows"] },
+          { title: "Users", url: "/admin/users", icon: Users, requires: ["admin:users"] },
+          { title: "Access", url: "/admin/access", icon: ShieldAlert, requires: ["admin:rbac"] },
+          { title: "Demo data", url: "/admin/demo", icon: Database, requires: ["admin:reset-demo"] },
+        ],
+      },
     ],
   },
 ];

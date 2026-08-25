@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/card";
 import { LiveDot } from "@/components/ui/live-dot";
 import type { Currency } from "@/core/types";
-import { partyMap, propertyMap } from "@/lib/lookup";
+import { leasePartyByRole, partyMap, propertyMap } from "@/lib/lookup";
 import { formatCurrency } from "@/lib/utils";
 import { getBackend } from "@/server/container";
 
@@ -118,7 +118,8 @@ export default async function Home() {
       const property = lease ? propertyById.get(lease.propertyId) : undefined;
       const tenant = lease ? partyById.get(lease.lesseePartyId) : undefined;
       const landlord = lease ? partyById.get(lease.lessorPartyId) : undefined;
-      return { entry, lease, property, tenant, landlord };
+      const advisor = leasePartyByRole(lease, "advisor", partyById);
+      return { entry, lease, property, tenant, landlord, advisor };
     })
     .sort((a, b) => a.entry.dueDate.localeCompare(b.entry.dueDate));
 

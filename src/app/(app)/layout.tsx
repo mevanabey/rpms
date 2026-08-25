@@ -1,16 +1,35 @@
 import type { ReactNode } from "react";
+import { redirect } from "next/navigation";
 
-import { AuthGate } from "@/components/app/auth-gate";
 import { DashboardShell } from "@/components/app/dashboard-shell";
+import { getCurrentAppUser } from "@/lib/auth/identity";
+import { AuthIdentityProvider } from "@/lib/auth/identity-context";
 
 /**
- * Authenticated app layout. Everything routed under `(app)/` runs through
- * the DashboardShell + AuthGate (redirects unauthed users to /login).
+ * Authenticated routes depend on the Supabase session cookie, which doesn't
+ * exist at build time. Mark the whole route group dynamic so Next.js doesn't
+ * try to statically prerender (and fail by hitting Supabase without a
+ * session).
  */
-export default function AppLayout({ children }: { children: ReactNode }) {
+export const dynamic = "force-dynamic";
+
+/**
+ * Authenticated app layout. Runs server-side:
+ *  - No Supabase session → redirect to /login
+ *  - Session present but disabled `user_role` row → redirect to /login
+ *  - Otherwise resolve the AppUser (auto-provisions a `viewer` row on first
+ *    sign-in) and inject it into the client tree so `useCurrentUser()` reads
+ *    a real identity instead of the demo Zustand flag.
+ */
+export default async function AppLayout({ children }: { children: ReactNode }) {
+  const user = await getCurrentAppUser();
+  if (!user) {
+    redirect("/login");
+  }
+
   return (
-    <AuthGate>
+    <AuthIdentityProvider user={user}>
       <DashboardShell>{children}</DashboardShell>
-    </AuthGate>
+    </AuthIdentityProvider>
   );
 }

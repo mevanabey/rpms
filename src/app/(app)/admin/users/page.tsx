@@ -63,7 +63,7 @@ export default function UsersPage() {
             <CardTitle>Members</CardTitle>
             <CardDescription>
               Role + entity scope drive sidebar visibility, mutation
-              authorization, and RLS scoping. Click "Sign in as" to simulate
+              authorization, and RLS scoping. Click “Sign in as” to simulate
               that user during the demo.
             </CardDescription>
           </CardHeader>

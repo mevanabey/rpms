@@ -61,7 +61,7 @@ export function DraftLeasesCard() {
                       Draft <span className="font-mono text-xs">{d.id.slice(-6)}</span>
                     </div>
                     <p className="mt-0.5 text-muted-foreground text-xs">
-                      Property: {intent.propertyId ?? "—"} · Lessee:{" "}
+                      Property: {intent.propertyId ?? "—"} · Tenant:{" "}
                       {intent.lesseePartyId ?? "—"} · {ago(d.ts, now)}
                     </p>
                   </div>

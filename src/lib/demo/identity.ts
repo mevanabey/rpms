@@ -122,6 +122,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
   { id: "admin", label: "Admin", description: "Full access — system, properties, leases, rent, and RBAC.", tone: ROLE_TONE_PRESETS[0].cls, builtin: true },
   { id: "account_manager", label: "Account Manager", description: "Day-to-day operator. Manages properties, leases, marks rent paid, and sends reminders.", tone: ROLE_TONE_PRESETS[1].cls, builtin: true },
   { id: "lawyer", label: "Lawyer", description: "Sees only the tenants they are assigned to. Read-only on properties and leases.", tone: ROLE_TONE_PRESETS[3].cls, builtin: true },
+  { id: "viewer", label: "Viewer", description: "Auto-provisioned default for new sign-ups. Admin must promote.", tone: ROLE_TONE_PRESETS[8].cls, builtin: true },
 ];
 
 export const DEFAULT_PERMISSIONS: Record<Role, Resource[]> = {
@@ -156,6 +157,7 @@ export const DEFAULT_PERMISSIONS: Record<Role, Resource[]> = {
     "documents:write",
     "reports:read",
   ],
+  viewer: [],
 };
 
 /** Built-in role IDs — used to refuse delete on these. */

@@ -21,6 +21,7 @@ import {
   type Role,
   type RoleDefinition,
 } from "./identity";
+import { useAuthIdentity } from "@/lib/auth/identity-context";
 
 /** True once the persisted state has rehydrated client-side. */
 export function useDemoHydrated(): boolean {
@@ -119,9 +120,16 @@ export function useVisibleActivities(): import("./types").Activity[] {
   );
 }
 
-/** Currently logged-in user, looked up by id. `null` when logged out. */
+/**
+ * Currently logged-in user. Prefers the server-resolved Supabase identity
+ * injected by `<AuthIdentityProvider>`; falls back to the legacy in-memory
+ * `PRESET_USERS` lookup so the public /login page still works before a
+ * session exists.
+ */
 export function useCurrentUser(): AppUser | null {
+  const fromCtx = useAuthIdentity();
   const id = useDemoStore((s) => s.currentUserId);
+  if (fromCtx) return fromCtx;
   if (!id) return null;
   return PRESET_USERS.find((u) => u.id === id) ?? null;
 }

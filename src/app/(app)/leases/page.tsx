@@ -4,7 +4,7 @@ import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { LedgerEntry } from "@/core/types";
-import { partyMap, propertyMap } from "@/lib/lookup";
+import { leasePartyByRole, partyMap, propertyMap } from "@/lib/lookup";
 import { getBackend } from "@/server/container";
 
 import { DraftLeasesCard } from "./_components/draft-leases-card";
@@ -27,13 +27,22 @@ export default async function LeasesPage() {
     const cur = nextRentByLease.get(e.leaseId);
     if (!cur || e.dueDate < cur.dueDate) nextRentByLease.set(e.leaseId, e);
   }
-  const rows: LeaseRow[] = leases.map((lease) => ({
-    lease,
-    property: propertyById.get(lease.propertyId),
-    lessor: partyById.get(lease.lessorPartyId),
-    lessee: partyById.get(lease.lesseePartyId),
-    nextRentEntry: nextRentByLease.get(lease.id),
-  }));
+  const leaseById = new Map(leases.map((l) => [l.id, l]));
+  const rows: LeaseRow[] = leases.map((lease) => {
+    const parent = lease.parentLeaseId ? leaseById.get(lease.parentLeaseId) : undefined;
+    const parentTenant = parent ? partyById.get(parent.lesseePartyId) : undefined;
+    return {
+      lease,
+      property: propertyById.get(lease.propertyId),
+      lessor: partyById.get(lease.lessorPartyId),
+      lessee: partyById.get(lease.lesseePartyId),
+      advisor: leasePartyByRole(lease, "advisor", partyById),
+      nextRentEntry: nextRentByLease.get(lease.id),
+      parentLabel: parent
+        ? parentTenant?.displayName ?? propertyById.get(parent.propertyId)?.name ?? parent.id
+        : undefined,
+    };
+  });
 
   return (
     <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">

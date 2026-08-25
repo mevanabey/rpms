@@ -8,20 +8,23 @@ import {
   Check,
   CheckCircle2,
   Columns3,
-  Copy,
   ExternalLink,
   Eye,
+  FileSpreadsheet,
   Mail,
   MoreHorizontal,
+  Pencil,
   RotateCcw,
   Send,
   SlidersHorizontal,
+  Trash2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { LeaseStatusBadge } from "@/components/app/status-badge";
 import { MoneyDisplay } from "@/components/app/money-display";
+import { SortableHeader, type SortDir } from "@/components/data-table/sortable-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -74,25 +77,35 @@ import { useDemoStore } from "@/lib/demo/store";
 import { scopeByLease } from "@/lib/demo/scope";
 import {
   useCurrentUser,
-  useRentPayments,
   useRentReminders,
 } from "@/lib/demo/use-store";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
+import {
+  downloadBase64File,
+  XLSX_MIME_TYPE,
+} from "@/lib/file-download.client";
+import { exportLeaseChecklistAction, markRentPaidAction } from "@/server/actions";
+
+import { DeleteLeaseDialog } from "./delete-lease-dialog";
 
 export type LeaseRow = {
   lease: Lease;
   property?: Property;
   lessor?: Party;
   lessee?: Party;
+  advisor?: Party;
   nextRentEntry?: LedgerEntry;
+  /** Display label for the master lease — set only when lease.parentLeaseId
+   *  exists. Drives the "Sub of: ..." badge in the Property cell. */
+  parentLabel?: string;
 };
 
 type ColumnKey =
-  | "lease"
   | "property"
   | "units"
   | "lessor"
   | "lessee"
+  | "advisor"
   | "rent"
   | "cadence"
   | "start"
@@ -104,20 +117,55 @@ interface ColumnDef {
   label: string;
   className?: string;
   cellClassName?: string;
+  align?: "left" | "right";
 }
 
 const COLUMNS: ColumnDef[] = [
-  { key: "lease", label: "Lease" },
   { key: "property", label: "Property" },
   { key: "units", label: "Units" },
-  { key: "lessor", label: "Lessor" },
-  { key: "lessee", label: "Lessee" },
-  { key: "rent", label: "Current rent", className: "text-right", cellClassName: "text-right tabular-nums" },
-  { key: "cadence", label: "Cadence" },
+  { key: "lessor", label: "Landlord" },
+  { key: "lessee", label: "Tenant" },
+  { key: "advisor", label: "Advisor" },
+  {
+    key: "rent",
+    label: "Monthly rental",
+    className: "text-right",
+    cellClassName: "text-right tabular-nums",
+    align: "right",
+  },
+  { key: "cadence", label: "Payment frequency" },
   { key: "start", label: "Start" },
   { key: "end", label: "End" },
   { key: "status", label: "Status" },
 ];
+
+function compareLeaseRows(key: ColumnKey, a: LeaseRow, b: LeaseRow): number {
+  switch (key) {
+    case "property":
+      return (a.property?.name ?? "").localeCompare(b.property?.name ?? "");
+    case "units":
+      return a.lease.unitIds.length - b.lease.unitIds.length;
+    case "lessor":
+      return (a.lessor?.displayName ?? "").localeCompare(b.lessor?.displayName ?? "");
+    case "lessee":
+      return (a.lessee?.displayName ?? "").localeCompare(b.lessee?.displayName ?? "");
+    case "advisor":
+      return (a.advisor?.displayName ?? "").localeCompare(b.advisor?.displayName ?? "");
+    case "rent": {
+      const av = a.lease.tranches[0]?.monthlyRent.amount ?? 0;
+      const bv = b.lease.tranches[0]?.monthlyRent.amount ?? 0;
+      return av - bv;
+    }
+    case "cadence":
+      return a.lease.paymentCadence.localeCompare(b.lease.paymentCadence);
+    case "start":
+      return a.lease.startDate.localeCompare(b.lease.startDate);
+    case "end":
+      return a.lease.endDate.localeCompare(b.lease.endDate);
+    case "status":
+      return a.lease.status.localeCompare(b.lease.status);
+  }
+}
 
 const STATUSES: LeaseStatus[] = [
   "draft",
@@ -170,19 +218,27 @@ function toggle<T>(set: Set<T>, value: T): Set<T> {
 export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
   const router = useRouter();
   const user = useCurrentUser();
-  const rentPayments = useRentPayments();
   const rentReminders = useRentReminders();
-  const markRentPaid = useDemoStore((s) => s.markRentPaid);
   const sendRentReminder = useDemoStore((s) => s.sendRentReminder);
 
   // Persistent state -----------------------------------------------------
   const [search, setSearch] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<LeaseRow | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [hidden, setHidden] = useState<Set<ColumnKey>>(new Set());
+  const [sort, setSort] = useState<{ key: ColumnKey; dir: SortDir } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState<number>(20);
+
+  const toggleSort = (key: ColumnKey) => {
+    setSort((cur) => {
+      if (!cur || cur.key !== key) return { key, dir: "asc" };
+      if (cur.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  };
 
   const properties = useMemo(() => {
     const map = new Map<string, Property>();
@@ -220,9 +276,17 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
     [hidden],
   );
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const sorted = useMemo(() => {
+    if (!sort) return filtered;
+    const arr = [...filtered];
+    arr.sort((a, b) => compareLeaseRows(sort.key, a, b));
+    if (sort.dir === "desc") arr.reverse();
+    return arr;
+  }, [filtered, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage = Math.min(page, totalPages - 1);
-  const pageRows = filtered.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const pageRows = sorted.slice(safePage * pageSize, (safePage + 1) * pageSize);
 
   const pageIds = pageRows.map((r) => r.lease.id);
   const allOnPageSelected =
@@ -269,11 +333,24 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
     clearSelection();
   };
 
-  const handleCopyId = (id: string) => {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(id);
-      toast.success("Copied", { description: id });
-    }
+  /** Download one lease as an .xlsx intake checklist. */
+  const exportChecklist = (leaseId: string) => {
+    const toastId = toast.loading("Building checklist…");
+    void (async () => {
+      const res = await exportLeaseChecklistAction(leaseId);
+      if (!res.ok) {
+        toast.error("Could not export checklist", {
+          id: toastId,
+          description: res.error,
+        });
+        return;
+      }
+      downloadBase64File(res.data.base64, res.data.fileName, XLSX_MIME_TYPE);
+      toast.success("Checklist exported", {
+        id: toastId,
+        description: res.data.fileName,
+      });
+    })();
   };
 
   const handleMarkPaid = (row: LeaseRow) => {
@@ -283,25 +360,22 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
     const today = new Date().toISOString().slice(0, 10);
     const method =
       entry.amount.currency === "USD" ? "usd_transfer" : "lkr_transfer";
-    markRentPaid(
-      entry.id,
-      {
-        paidDate: today,
-        by: user.name,
-        method,
-        reference: `manual-${entry.id}`,
-      },
-      {
-        leaseId: entry.leaseId,
-        amount: entry.amount,
-        tenantName: row.lessee?.displayName,
-      },
-    );
-    toast.success("Rent marked as paid", {
-      description: `${row.lessee?.displayName ?? row.lease.id} · ${formatCurrency(
-        entry.amount.amount,
-        { currency: entry.amount.currency, noDecimals: true },
-      )}`,
+    void markRentPaidAction(entry.id, {
+      paidDate: today,
+      paymentMethod: method,
+      reference: `manual-${entry.id}`,
+    }).then((result) => {
+      if (!result.ok) {
+        toast.error("Could not mark paid", { description: result.error });
+        return;
+      }
+      toast.success("Rent marked as paid", {
+        description: `${row.lessee?.displayName ?? row.lease.id} · ${formatCurrency(
+          entry.amount.amount,
+          { currency: entry.amount.currency, noDecimals: true },
+        )}`,
+      });
+      router.refresh();
     });
   };
 
@@ -346,6 +420,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
     setFilters(EMPTY_FILTERS);
     setSearch("");
     setHidden(new Set());
+    setSort(null);
     clearSelection();
   };
 
@@ -440,7 +515,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                 }
               />
               <FilterGroup
-                label="Cadence"
+                label="Payment frequency"
                 values={CADENCES}
                 active={filters.cadences}
                 onToggle={(v) =>
@@ -541,7 +616,13 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                 </TableHead>
                 {visibleColumns.map((c) => (
                   <TableHead key={c.key} className={c.className}>
-                    {c.label}
+                    <SortableHeader
+                      label={c.label}
+                      align={c.align}
+                      active={sort?.key === c.key}
+                      direction={sort?.key === c.key ? sort.dir : "asc"}
+                      onToggle={() => toggleSort(c.key)}
+                    />
                   </TableHead>
                 ))}
                 <TableHead
@@ -565,8 +646,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
               {pageRows.map((r) => {
                 const isSelected = selected.has(r.lease.id);
                 const entry = r.nextRentEntry;
-                const overlayPaid = entry ? !!rentPayments[entry.id] : false;
-                const alreadyPaid = entry ? !!entry.paidDate || overlayPaid : false;
+                const alreadyPaid = entry ? !!entry.paidDate : false;
                 const lastReminder = entry
                   ? rentReminders.find((rem) => rem.ledgerEntryId === entry.id)
                   : undefined;
@@ -641,8 +721,8 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-48">
-                            <DropdownMenuLabel className="font-mono text-[10px]">
-                              {r.lease.id}
+                            <DropdownMenuLabel>
+                              {r.lessee?.displayName ?? r.property?.name ?? "Lease"}
                             </DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
@@ -650,8 +730,24 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                             >
                               <Eye className="size-3.5" /> Open lease
                             </DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => handleCopyId(r.lease.id)}>
-                              <Copy className="size-3.5" /> Copy id
+                            <DropdownMenuItem
+                              onSelect={() =>
+                                router.push(`/leases/${r.lease.id}?edit=1`)
+                              }
+                            >
+                              <Pencil className="size-3.5" /> Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() => exportChecklist(r.lease.id)}
+                            >
+                              <FileSpreadsheet className="size-3.5" /> Export checklist
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => setDeleteTarget(r)}
+                            >
+                              <Trash2 className="size-3.5" /> Delete
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -671,7 +767,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
         <div className="flex items-center gap-2 text-muted-foreground text-xs">
           <CalendarDays className="size-3.5" />
           Page {safePage + 1} of {totalPages} · {filtered.length} leases
-          {(activeFilterCount > 0 || search || hidden.size > 0) && (
+          {(activeFilterCount > 0 || search || hidden.size > 0 || sort) && (
             <Button variant="ghost" size="sm" className="h-6" onClick={resetAll}>
               <RotateCcw className="size-3" /> Reset view
             </Button>
@@ -714,6 +810,15 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
           </Button>
         </div>
       </div>
+
+      {deleteTarget && (
+        <DeleteLeaseDialog
+          leaseId={deleteTarget.lease.id}
+          label={deleteTarget.lessee?.displayName ?? deleteTarget.property?.name}
+          open
+          onOpenChange={(o) => !o && setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -721,17 +826,17 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
 function renderCell(key: ColumnKey, r: LeaseRow): React.ReactNode {
   const l = r.lease;
   switch (key) {
-    case "lease":
+    case "property":
       return (
-        <div className="font-mono text-xs">
-          <div className="font-medium text-foreground">{l.id}</div>
-          <div className="text-muted-foreground">
-            {l.kind} · {l.purpose}
-          </div>
+        <div className="flex flex-col gap-0.5">
+          <span>{r.property?.name ?? "—"}</span>
+          {r.parentLabel && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-violet-700 dark:text-violet-300">
+              Sub of: <span className="font-medium">{r.parentLabel}</span>
+            </span>
+          )}
         </div>
       );
-    case "property":
-      return r.property?.name ?? "—";
     case "units":
       return (
         <Badge variant="outline" className="font-mono text-xs">
@@ -742,6 +847,8 @@ function renderCell(key: ColumnKey, r: LeaseRow): React.ReactNode {
       return r.lessor?.displayName ?? "—";
     case "lessee":
       return r.lessee?.displayName ?? "—";
+    case "advisor":
+      return r.advisor?.displayName ?? "—";
     case "rent":
       return <MoneyDisplay amount={l.tranches[0]?.monthlyRent} />;
     case "cadence":

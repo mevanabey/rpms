@@ -93,7 +93,7 @@ export default async function EscalationsPage() {
                 <TableHead className="text-right">From</TableHead>
                 <TableHead className="text-right">To</TableHead>
                 <TableHead className="text-right">Change</TableHead>
-                <TableHead>Tranche window</TableHead>
+                <TableHead>Period window</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

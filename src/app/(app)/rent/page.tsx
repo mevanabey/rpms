@@ -1,5 +1,5 @@
 import { RoleGate } from "@/components/app/role-gate";
-import { partyMap, propertyMap } from "@/lib/lookup";
+import { leasePartyByRole, partyMap, propertyMap } from "@/lib/lookup";
 import { getBackend } from "@/server/container";
 
 import { RentBoard, type RentRow } from "./_components/rent-board";
@@ -25,12 +25,14 @@ export default async function RentPage() {
       const property = lease ? propertyById.get(lease.propertyId) : undefined;
       const tenant = lease ? partyById.get(lease.lesseePartyId) : undefined;
       const landlord = lease ? partyById.get(lease.lessorPartyId) : undefined;
+      const advisor = leasePartyByRole(lease, "advisor", partyById);
       return {
         entry,
         lease,
         property,
         tenant,
         landlord,
+        advisor,
       };
     })
     .sort((a, b) => a.entry.dueDate.localeCompare(b.entry.dueDate));

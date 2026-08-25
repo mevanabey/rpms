@@ -27,8 +27,26 @@ export type {
   IReminderService,
 };
 
-export type { LeaseListFilter } from "./leases";
+export type {
+  LeaseClausesPatch,
+  LeaseCreateIntent,
+  LeaseListFilter,
+  LeaseUpdateInput,
+  TrancheUpdateInput,
+} from "./leases";
 export type { OnboardingIntent, OnboardingStep, OnboardingState } from "./onboarding";
-export type { PartyListFilter } from "./parties";
-export type { PaymentListFilter } from "./payments";
+export type {
+  PartyCreateInput,
+  PartyListFilter,
+  PartyUpdateInput,
+} from "./parties";
+export type {
+  MarkPaidInput,
+  PaymentListFilter,
+} from "./payments";
+export type {
+  PropertyCreateInput,
+  PropertyUpdateInput,
+  UnitCreateInput,
+} from "./properties";
 export type { ReminderListFilter } from "./reminders";

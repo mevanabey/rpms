@@ -70,9 +70,26 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import type { Lease, Party, Property, Unit } from "@/core/types";
+import type {
+  AgreementLabel,
+  Currency,
+  Lease,
+  LeaseClauses,
+  LeaseKind,
+  LeasePartyRole,
+  LeasePurpose,
+  Money,
+  Party,
+  PartyRole,
+  PaymentCadence,
+  PaymentMethod,
+  Property,
+  Unit,
+} from "@/core/types";
+import type { LeaseCreateIntent } from "@/core/services";
 import type { DraftParty } from "@/lib/demo/types";
 import { useDemoStore } from "@/lib/demo/store";
+import { createLeaseAction } from "@/server/actions";
 import {
   useDraftParties,
   useDraftProperties,
@@ -472,11 +489,11 @@ export function NewLeaseForm({
   async function onSubmit(values: FormValues) {
     setSubmitting(true);
     try {
-      await new Promise((r) => setTimeout(r, 400));
       const store = useDemoStore.getState();
 
-      // Persist any new addresses to the client overlay so they pre-fill
-      // next time the form opens.
+      // Cache addresses locally so the form pre-fills next time. (The lease
+      // itself doesn't carry address — it's a party-level field. We'd update
+      // the party row via a separate action when ready.)
       if (values.lessorAddress?.trim()) {
         store.setPartyAddress(values.lessorPartyId, values.lessorAddress);
       }
@@ -488,10 +505,28 @@ export function NewLeaseForm({
       }
 
       const masterIntent = buildMasterIntent(values);
-      const master = store.addDraftLease(masterIntent);
+      const masterIntentTyped = toLeaseCreateIntent(masterIntent, values);
+      const masterResult = await createLeaseAction(masterIntentTyped);
+      if (!masterResult.ok) {
+        toast.error("Could not save lease", { description: masterResult.error });
+        return;
+      }
+      const master = masterResult.data;
+
       let sub: { id: string } | undefined;
       if (values.hasSubtenancy && values.sub) {
-        sub = store.addDraftLease(buildSubIntent(values, master.id));
+        const subIntent = toLeaseCreateIntent(
+          buildSubIntent(values, master.id),
+          values,
+        );
+        const subResult = await createLeaseAction(subIntent);
+        if (!subResult.ok) {
+          toast.error("Master saved, but sub-lease failed", {
+            description: subResult.error,
+          });
+          return;
+        }
+        sub = subResult.data;
       }
 
       const realProperty = properties.find((p) => p.id === values.propertyId);
@@ -509,18 +544,6 @@ export function NewLeaseForm({
             draftPartyById.get(values.sub.tenantPartyId))
           : undefined;
 
-      // Activity log + KYC approval workflow disabled — app simplified.
-      // store.pushActivity({
-      //   workflow: "onboard-tenant",
-      //   severity: "success",
-      //   title: `Lease draft queued · ${property?.name ?? "—"}`,
-      //   body: sub
-      //     ? `Wizard submitted. Master: ${lessee?.displayName ?? "—"}. Paired sub-tenancy: ${subTenant?.displayName ?? "—"}.`
-      //     : `Wizard submitted. Tenant: ${lessee?.displayName ?? "—"}.`,
-      // });
-      // const approval = store.requestApproval({ … });
-      void store;
-
       const recipients = Array.from(
         new Set(
           [
@@ -531,11 +554,11 @@ export function NewLeaseForm({
         ),
       );
 
-      toast.success("Lease draft generated", {
+      toast.success("Lease saved", {
         description:
           recipients.length > 0
-            ? `Auto-sent for signature to ${recipients.join(", ")}.`
-            : "Saved as draft. No party emails on file — send manually.",
+            ? `Persisted. Notify ${recipients.join(", ")} when ready.`
+            : "Persisted as draft. No party emails on file — send manually.",
         duration: 7000,
       });
 
@@ -802,11 +825,11 @@ export function NewLeaseForm({
         <SectionCard
           icon={Users}
           title="Parties"
-          description="Lessor (landlord) and Lessee (tenant) — both required."
+          description="Landlord and Tenant — both required."
         >
           <div className="grid gap-4 md:grid-cols-2">
             <PartyBlock
-              label="Lessor (Landlord)"
+              label="Landlord"
               partyIdName="lessorPartyId"
               addressName="lessorAddress"
               parties={parties}
@@ -814,7 +837,7 @@ export function NewLeaseForm({
               form={form}
             />
             <PartyBlock
-              label="Lessee (Tenant)"
+              label="Tenant"
               partyIdName="lesseePartyId"
               addressName="lesseeAddress"
               parties={parties}
@@ -872,7 +895,7 @@ export function NewLeaseForm({
             <OptionalPartySelect
               control={form.control}
               name="lesseeLawyerPartyId"
-              label="CTP (Tenant's) Lawyer"
+              label="CTP Lawyer"
               parties={parties}
               draftParties={draftParties}
             />
@@ -883,7 +906,7 @@ export function NewLeaseForm({
         <SectionCard
           icon={ClipboardList}
           title="Term & notice"
-          description="Dates and the notice / lock-in clauses."
+          description="Dates and the notice / locking-period clauses."
         >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <DateField control={form.control} name="startDate" label="Start date" />
@@ -895,7 +918,7 @@ export function NewLeaseForm({
               placeholder="e.g. 3"
             />
             <div className="flex flex-col gap-1.5">
-              <Label className="text-xs">Lock-in (years)</Label>
+              <Label className="text-xs">Locking period (years)</Label>
               <div className="flex items-center gap-2">
                 <FormField
                   control={form.control}
@@ -953,7 +976,7 @@ export function NewLeaseForm({
         <SectionCard
           icon={Receipt}
           title="Money"
-          description="Deposit, legal fees, stamp duty, cadence, and payment method."
+          description="Deposit, legal fees, stamp duty, payment frequency, and payment method."
         >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <MoneyField
@@ -1075,7 +1098,7 @@ export function NewLeaseForm({
               name="paymentCadence"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Cadence</FormLabel>
+                  <FormLabel>Payment frequency</FormLabel>
                   <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
@@ -1142,7 +1165,7 @@ export function NewLeaseForm({
               control={form.control}
               amountName="handoverDelayPenaltyAmount"
               currencyName="handoverDelayPenaltyCurrency"
-              label="Handover delay penalty / day"
+              label="Penalty for delay handover / day"
             />
           </div>
           <Separator className="my-2" />
@@ -1237,7 +1260,7 @@ export function NewLeaseForm({
             name="earlyTerminationPenalty"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Early-termination penalty</FormLabel>
+                <FormLabel>Penalty for early termination</FormLabel>
                 <FormControl>
                   <Textarea
                     rows={2}
@@ -1254,7 +1277,7 @@ export function NewLeaseForm({
         <SectionCard
           icon={FileSignature}
           title="Master rent schedule"
-          description="One tranche per flat-rent window. Add more for escalations."
+          description="One period per flat-rent window. Add more for escalations."
         >
           <div className="flex justify-end">
             <Button
@@ -1273,7 +1296,7 @@ export function NewLeaseForm({
                 })
               }
             >
-              <Plus className="size-4" /> Add tranche
+              <Plus className="size-4" /> Add period
             </Button>
           </div>
           <div className="space-y-3">
@@ -1373,14 +1396,14 @@ export function NewLeaseForm({
                 <Link href="/leases">Cancel</Link>
               </Button>
               <Button type="submit" disabled={submitting}>
-                {submitting ? "Submitting…" : "Submit (mock)"}
+                {submitting ? "Submitting…" : "Submit"}
               </Button>
             </div>
           </div>
         </div>
 
         {/* What the system does next */}
-        <Card className="border-dashed">
+        {/* <Card className="border-dashed">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Bot className="size-4" />
@@ -1423,17 +1446,111 @@ export function NewLeaseForm({
                 n={watchedHasSubtenancy ? 5 : 4}
                 icon={ListChecks}
                 label="Materialize obligations"
-                detail="Tranches → monthly rent + deposit + stamp duty rows on activation."
+                detail="Rental periods → monthly rent + deposit + stamp duty rows on activation."
               />
             </ol>
           </CardContent>
-        </Card>
+        </Card> */}
       </form>
     </Form>
   );
 }
 
 // ───────────────────────────────────────────────────── Submit helpers
+
+function addYears(iso: string, years: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(Date.UTC(y + years, m - 1, d));
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Convert the wizard's untyped intent dict into the strongly-typed
+ * `LeaseCreateIntent` shape the Backend contract expects. `values` is passed
+ * separately so we can resolve `lockInYears` → `lockInEndDate` (a true date)
+ * without round-tripping through the intent dict.
+ */
+function toLeaseCreateIntent(
+  intent: Record<string, unknown>,
+  values: FormValues,
+): LeaseCreateIntent {
+  const i = intent as {
+    propertyId: string;
+    unitIds: string[];
+    lessorPartyId: string;
+    lesseePartyId: string;
+    parentLeaseId?: string;
+    kind: LeaseKind;
+    purpose: LeasePurpose;
+    agreementLabel?: AgreementLabel;
+    agreementLabelOther?: string;
+    startDate: string;
+    endDate: string;
+    advanceMonths?: number;
+    occupancyCap?: number;
+    lockInYears?: number;
+    paymentCadence: PaymentCadence;
+    defaultPaymentMethod: PaymentMethod;
+    securityDeposit?: Money;
+    stampDuty?: Money;
+    legalFees?: Money;
+    clauses?: LeaseClauses;
+    additionalRoles?: { partyId: string; role: PartyRole }[];
+    tranches: Array<{
+      sequence: number;
+      startDate: string;
+      endDate: string;
+      monthlyRent: Money;
+      advanceSetoff?: Money;
+      dueDayOfMonth: number;
+      paymentDescription?: string;
+      fxRateLkrPerUsd?: number;
+    }>;
+  };
+  void values;
+  const lockInEndDate =
+    typeof i.lockInYears === "number" && i.lockInYears > 0 && i.startDate
+      ? addYears(i.startDate, i.lockInYears)
+      : undefined;
+  const additionalRoles: LeasePartyRole[] | undefined = i.additionalRoles?.map(
+    (r) => ({ partyId: r.partyId, role: r.role }),
+  );
+  return {
+    propertyId: i.propertyId,
+    unitIds: i.unitIds,
+    lessorPartyId: i.lessorPartyId,
+    lesseePartyId: i.lesseePartyId,
+    parentLeaseId: i.parentLeaseId,
+    kind: i.kind,
+    purpose: i.purpose,
+    agreementLabel: i.agreementLabel,
+    agreementLabelOther: i.agreementLabelOther,
+    paymentCadence: i.paymentCadence,
+    defaultPaymentMethod: i.defaultPaymentMethod,
+    startDate: i.startDate,
+    endDate: i.endDate,
+    lockInEndDate,
+    advanceMonths: i.advanceMonths,
+    occupancyCap: i.occupancyCap,
+    securityDeposit: i.securityDeposit,
+    stampDuty: i.stampDuty,
+    legalFees: i.legalFees,
+    clauses: i.clauses,
+    additionalRoles,
+    tranches: i.tranches.map((t) => ({
+      sequence: t.sequence,
+      startDate: t.startDate,
+      endDate: t.endDate,
+      monthlyRent: t.monthlyRent,
+      advanceSetoff: t.advanceSetoff,
+      dueDayOfMonth: t.dueDayOfMonth,
+      paymentDescription: t.paymentDescription,
+      fxRateLkrPerUsd: t.fxRateLkrPerUsd,
+    })),
+    status: "draft",
+  };
+}
 
 function buildMasterIntent(values: FormValues): Record<string, unknown> {
   return {
@@ -1764,7 +1881,7 @@ function ResponsibilityRow({
             </FormLabel>
             <FormControl>
               <Input
-                placeholder="e.g. Lessee at its cost throughout the tenancy."
+                placeholder="e.g. Tenant at its cost throughout the tenancy."
                 {...field}
               />
             </FormControl>
@@ -1919,14 +2036,14 @@ function TrancheBlock({
   return (
     <div className="rounded-lg border p-3">
       <div className="mb-3 flex items-center justify-between">
-        <Badge variant="outline">Tranche {index + 1}</Badge>
+        <Badge variant="outline">Period {index + 1}</Badge>
         {canRemove && (
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
             onClick={onRemove}
-            aria-label="Remove tranche"
+            aria-label="Remove period"
           >
             <Trash2 className="size-4" />
           </Button>
@@ -1964,7 +2081,7 @@ function TrancheBlock({
           name={`${fieldPath}.${index}.monthlyRent` as const}
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Monthly rent</FormLabel>
+              <FormLabel>Monthly rental</FormLabel>
               <FormControl>
                 <Input type="number" min={0} {...field} />
               </FormControl>
@@ -2146,7 +2263,7 @@ function SubTenancyBlock({
           name="sub.cadence"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Cadence</FormLabel>
+              <FormLabel>Payment frequency</FormLabel>
               <Select onValueChange={field.onChange} value={field.value}>
                 <FormControl>
                   <SelectTrigger>
@@ -2256,7 +2373,7 @@ function SubTenancyBlock({
             })
           }
         >
-          <Plus className="size-4" /> Add tranche
+          <Plus className="size-4" /> Add period
         </Button>
       </div>
       <div className="space-y-3">

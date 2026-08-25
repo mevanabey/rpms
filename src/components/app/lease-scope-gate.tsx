@@ -47,7 +47,7 @@ export function LeaseScopeGate({
             <div>
               <CardTitle className="text-lg">Out of your scope</CardTitle>
               <CardDescription className="mt-0.5 text-sm">
-                This lease isn't on your assignment list. Ask an admin if you
+                This lease isn’t on your assignment list. Ask an admin if you
                 believe this is wrong.
               </CardDescription>
             </div>

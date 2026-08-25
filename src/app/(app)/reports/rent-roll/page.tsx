@@ -75,7 +75,7 @@ export default async function RentRollPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>Monthly rent (LKR)</CardDescription>
+            <CardDescription>Monthly rental (LKR)</CardDescription>
             <CardTitle className="text-xl tabular-nums">
               {formatCurrency(monthly.LKR, { currency: "LKR", noDecimals: true })}
             </CardTitle>
@@ -83,7 +83,7 @@ export default async function RentRollPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>Monthly rent (USD)</CardDescription>
+            <CardDescription>Monthly rental (USD)</CardDescription>
             <CardTitle className="text-xl tabular-nums">
               {formatCurrency(monthly.USD, { currency: "USD", noDecimals: true })}
             </CardTitle>
@@ -106,9 +106,9 @@ export default async function RentRollPage() {
               <TableRow>
                 <TableHead>Lease</TableHead>
                 <TableHead>Property</TableHead>
-                <TableHead>Lessee</TableHead>
-                <TableHead className="text-right">Monthly rent</TableHead>
-                <TableHead>Cadence</TableHead>
+                <TableHead>Tenant</TableHead>
+                <TableHead className="text-right">Monthly rental</TableHead>
+                <TableHead>Payment frequency</TableHead>
                 <TableHead className="text-right">Paid (LKR)</TableHead>
                 <TableHead className="text-right">Paid (USD)</TableHead>
                 <TableHead>Term</TableHead>

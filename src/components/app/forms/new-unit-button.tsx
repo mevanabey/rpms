@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useTransition, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 
 import { Plus } from "lucide-react";
 import { useForm, type Resolver } from "react-hook-form";
@@ -34,10 +35,8 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import type { Property } from "@/core/types";
-import type { DraftUnit } from "@/lib/demo/types";
-import { useDemoStore } from "@/lib/demo/store";
-import { useDraftProperties } from "@/lib/demo/use-store";
+import type { Property, Unit } from "@/core/types";
+import { createUnitAction } from "@/server/actions";
 
 const schema = z.object({
   propertyId: z.string().min(1, "Pick a property"),
@@ -69,16 +68,17 @@ export function NewUnitButton({
   onOpenChange?: (open: boolean) => void;
   trigger?: ReactNode;
   hideTrigger?: boolean;
-  onCreated?: (draft: DraftUnit) => void;
+  onCreated?: (unit: Unit) => void;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
   const isControlled = openProp !== undefined;
   const open = isControlled ? openProp! : internalOpen;
   const setOpen = (next: boolean) => {
     if (!isControlled) setInternalOpen(next);
     onOpenChange?.(next);
   };
-  const draftProperties = useDraftProperties();
   const form = useForm<Values>({
     resolver: zodResolver(schema) as unknown as Resolver<Values>,
     defaultValues: {
@@ -90,28 +90,33 @@ export function NewUnitButton({
   });
 
   function onSubmit(values: Values) {
-    const store = useDemoStore.getState();
-    const draft = store.addDraftUnit(values);
-    const propertyName =
-      properties.find((p) => p.id === values.propertyId)?.name ??
-      draftProperties.find((p) => p.id === values.propertyId)?.name ??
-      values.propertyId;
-    // Activity log disabled — app simplified.
-    // store.pushActivity({
-    //   workflow: "system",
-    //   severity: "success",
-    //   title: `Unit added · ${propertyName} — ${values.label}`,
-    //   body: `New unit ${draft.id.slice(-6)} (${values.type}, ${values.status}).`,
-    // });
-    toast.success("Unit added", {
-      description: `${propertyName} now has a new unit "${values.label}".`,
+    startTransition(async () => {
+      const result = await createUnitAction({
+        propertyId: values.propertyId,
+        label: values.label,
+        type: values.type,
+        floor: values.floor || undefined,
+        areaSqft: values.areaSqft,
+        bedrooms: values.bedrooms,
+        status: values.status,
+      });
+      if (!result.ok) {
+        toast.error("Could not add unit", { description: result.error });
+        return;
+      }
+      const propertyName =
+        properties.find((p) => p.id === values.propertyId)?.name ?? values.propertyId;
+      toast.success("Unit added", {
+        description: `${propertyName} now has a new unit "${result.data.label}".`,
+      });
+      form.reset({ ...form.getValues(), label: "" });
+      onCreated?.(result.data);
+      setOpen(false);
+      router.refresh();
     });
-    form.reset({ ...form.getValues(), label: "" });
-    onCreated?.(draft);
-    setOpen(false);
   }
 
-  const allProperties = [...properties, ...draftProperties];
+  const allProperties = properties;
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -267,8 +272,15 @@ export function NewUnitButton({
               />
             </div>
             <SheetFooter className="px-0 pt-4">
-              <Button type="submit">Add unit</Button>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              <Button type="submit" disabled={pending}>
+                {pending ? "Adding…" : "Add unit"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOpen(false)}
+                disabled={pending}
+              >
                 Cancel
               </Button>
             </SheetFooter>

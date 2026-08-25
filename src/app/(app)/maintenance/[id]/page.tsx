@@ -113,7 +113,7 @@ export default function TicketDetailPage({
             {ticket.costCapApplies && (
               <Badge variant="outline" className="text-xs">
                 <ShieldAlert className="mr-1 size-3" />
-                Lessee-side · Rs. 75,000 cap
+                Tenant-side · Rs. 75,000 cap
               </Badge>
             )}
           </div>

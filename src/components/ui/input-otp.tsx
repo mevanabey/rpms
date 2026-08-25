@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { OTPInput, OTPInputContext } from "input-otp"
+import { OTPInput, OTPInputContext, type RenderProps } from "input-otp"
 
 import { cn } from "@/lib/utils"
 import { MinusIcon } from "lucide-react"
@@ -47,7 +47,13 @@ function InputOTPSlot({
 }: React.ComponentProps<"div"> & {
   index: number
 }) {
-  const inputOTPContext = React.useContext(OTPInputContext)
+  // input-otp@1.4.2's declaration file imports React as `React$1` but then
+  // references a bare `React` namespace it never imported, so several of its
+  // types resolve to `{}` — including what `useContext` infers here. The error
+  // is hidden inside the .d.ts by `skipLibCheck`. `RenderProps` itself is
+  // exported and well-formed, so naming it explicitly restores the real shape
+  // without an `as` cast (CLAUDE.md §10).
+  const inputOTPContext = React.useContext<RenderProps>(OTPInputContext)
   const { char, hasFakeCaret, isActive } = inputOTPContext?.slots[index] ?? {}
 
   return (

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useTransition, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 
 import { Plus } from "lucide-react";
 import { useForm, type Resolver } from "react-hook-form";
@@ -35,8 +36,8 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import type { DraftParty } from "@/lib/demo/types";
-import { useDemoStore } from "@/lib/demo/store";
+import type { Party } from "@/core/types";
+import { createPartyAction } from "@/server/actions";
 
 const schema = z.object({
   kind: z.enum(["individual", "company"]),
@@ -71,10 +72,12 @@ export function NewPartyButton({
   onOpenChange?: (open: boolean) => void;
   trigger?: ReactNode;
   hideTrigger?: boolean;
-  onCreated?: (draft: DraftParty) => void;
+  onCreated?: (party: Party) => void;
   defaultKind?: "individual" | "company";
 } = {}) {
   const [internalOpen, setInternalOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
   const isControlled = openProp !== undefined;
   const open = isControlled ? openProp! : internalOpen;
   const setOpen = (next: boolean) => {
@@ -98,32 +101,38 @@ export function NewPartyButton({
   const kind = form.watch("kind");
 
   function onSubmit(values: Values) {
-    const store = useDemoStore.getState();
-    const draft = store.addDraftParty({
-      kind: values.kind,
-      displayName: values.displayName,
-      legalName: values.legalName || undefined,
-      nicOrPassport: values.nicOrPassport || undefined,
-      companyRegNo: values.companyRegNo || undefined,
-      emails: splitList(values.emails),
-      phones: splitList(values.phones),
-      notes: values.notes || undefined,
+    startTransition(async () => {
+      const result = await createPartyAction({
+        kind: values.kind,
+        displayName: values.displayName,
+        legalName: values.legalName || undefined,
+        nicOrPassport: values.nicOrPassport || undefined,
+        companyRegNo: values.companyRegNo || undefined,
+        emails: splitList(values.emails),
+        phones: splitList(values.phones),
+        notes: values.notes || undefined,
+      });
+      if (!result.ok) {
+        toast.error("Could not add party", { description: result.error });
+        return;
+      }
+      toast.success("Party added", {
+        description: `${result.data.displayName} is now in your directory.`,
+      });
+      form.reset({
+        kind: defaultKind,
+        displayName: "",
+        legalName: "",
+        nicOrPassport: "",
+        companyRegNo: "",
+        emails: "",
+        phones: "",
+        notes: "",
+      });
+      onCreated?.(result.data);
+      setOpen(false);
+      router.refresh();
     });
-    toast.success("Party added", {
-      description: `${values.displayName} is now in your directory.`,
-    });
-    form.reset({
-      kind: defaultKind,
-      displayName: "",
-      legalName: "",
-      nicOrPassport: "",
-      companyRegNo: "",
-      emails: "",
-      phones: "",
-      notes: "",
-    });
-    onCreated?.(draft);
-    setOpen(false);
   }
 
   return (
@@ -279,8 +288,15 @@ export function NewPartyButton({
               )}
             />
             <SheetFooter className="px-0 pt-4">
-              <Button type="submit">Add party</Button>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              <Button type="submit" disabled={pending}>
+                {pending ? "Adding…" : "Add party"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOpen(false)}
+                disabled={pending}
+              >
                 Cancel
               </Button>
             </SheetFooter>

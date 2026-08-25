@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
-import dynamic from "next/dynamic";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
 
 import { Download, FileText } from "lucide-react";
 
@@ -15,25 +14,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { LeaseDocumentPreview } from "@/components/app/lease-document-preview";
 import type { Party, Property, Unit } from "@/core/types";
 import { partyMap } from "@/lib/lookup";
 import type { DraftProperty } from "@/lib/demo/types";
 import { useLeaseDocSettings } from "@/lib/demo/use-store";
-import { LeaseDocument } from "@/templates/leases/lease-document";
 import {
   fromDraftIntent,
   type LeaseDocumentData,
 } from "@/templates/leases/lease-document-data";
-
-const PDFViewer = dynamic(
-  () => import("@react-pdf/renderer").then((m) => m.PDFViewer),
-  { ssr: false, loading: () => <Skeleton className="h-[640px] w-full" /> },
-);
-const PDFDownloadLink = dynamic(
-  () => import("@react-pdf/renderer").then((m) => m.PDFDownloadLink),
-  { ssr: false },
-);
+import { downloadLeaseAgreement } from "@/templates/leases/lease-template-render";
 
 export function DraftLeaseDocumentDialog({
   draftId,
@@ -53,6 +43,7 @@ export function DraftLeaseDocumentDialog({
   trigger?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [downloading, startDownload] = useTransition();
   const settings = useLeaseDocSettings();
 
   const data: LeaseDocumentData = useMemo(() => {
@@ -73,8 +64,6 @@ export function DraftLeaseDocumentDialog({
     return fromDraftIntent(draftId, intent, propertyLike, units, partyMap(parties));
   }, [draftId, intent, property, draftProperty, units, parties]);
 
-  const fileName = `${data.agreementTitle.replace(/\s+/g, "-").toLowerCase()}-${draftId}.pdf`;
-
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -92,24 +81,18 @@ export function DraftLeaseDocumentDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="overflow-hidden rounded-md border">
-          {open && (
-            <PDFViewer
-              showToolbar={false}
-              style={{ width: "100%", height: 640, border: 0 }}
-            >
-              <LeaseDocument data={data} settings={settings} />
-            </PDFViewer>
-          )}
+          {open && <LeaseDocumentPreview data={data} settings={settings} className="h-[640px]" />}
         </div>
         <DialogFooter>
-          <PDFDownloadLink document={<LeaseDocument data={data} settings={settings} />} fileName={fileName}>
-            {({ loading }) => (
-              <Button size="sm" variant="outline" disabled={loading}>
-                <Download className="size-3.5" />
-                {loading ? "Preparing…" : "Download draft"}
-              </Button>
-            )}
-          </PDFDownloadLink>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => startDownload(async () => { await downloadLeaseAgreement(data, settings); })}
+            disabled={downloading}
+          >
+            <Download className="size-3.5" />
+            {downloading ? "Preparing…" : "Download draft (.docx)"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

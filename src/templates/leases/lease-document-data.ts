@@ -67,6 +67,7 @@ export interface LeaseDocumentData {
   startDate: string;
   endDate: string;
   advanceMonths?: number;
+  occupancyCap?: number;
   lockInEndDate?: string;
   paymentCadence: PaymentCadence;
   defaultPaymentMethod: PaymentMethod;
@@ -125,6 +126,7 @@ export function fromLease(
     startDate: lease.startDate,
     endDate: lease.endDate,
     advanceMonths: lease.advanceMonths,
+    occupancyCap: lease.occupancyCap,
     lockInEndDate: lease.lockInEndDate,
     paymentCadence: lease.paymentCadence,
     defaultPaymentMethod: lease.defaultPaymentMethod,
@@ -160,6 +162,7 @@ interface DraftIntent {
   startDate?: string;
   endDate?: string;
   advanceMonths?: number;
+  occupancyCap?: number;
   paymentCadence?: PaymentCadence;
   defaultPaymentMethod?: PaymentMethod;
   securityDeposit?: Money;
@@ -227,6 +230,7 @@ export function fromDraftIntent(
     startDate: i.startDate ?? "",
     endDate: i.endDate ?? "",
     advanceMonths: i.advanceMonths,
+    occupancyCap: i.occupancyCap,
     paymentCadence: i.paymentCadence ?? "monthly",
     defaultPaymentMethod: i.defaultPaymentMethod ?? "lkr_transfer",
     securityDeposit: i.securityDeposit,

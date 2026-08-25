@@ -54,7 +54,7 @@ export function RoleGate({
                 <span className="font-medium text-foreground">
                   {roleDef?.label ?? user.role}
                 </span>{" "}
-                — doesn't grant access to this page.
+                — doesn’t grant access to this page.
               </CardDescription>
             </div>
           </div>
