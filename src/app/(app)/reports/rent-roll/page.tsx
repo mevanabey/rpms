@@ -1,3 +1,4 @@
+import { requireResource } from "@/lib/auth/authorization";
 import Link from "next/link";
 
 import { LeaseStatusBadge } from "@/components/app/status-badge";
@@ -20,6 +21,7 @@ function activeTranche(lease: Lease): RentScheduleTranche | undefined {
 }
 
 export default async function RentRollPage() {
+  await requireResource("reports:read");
   const backend = getBackend();
   const [leases, properties, parties, ledger] = await Promise.all([
     backend.leases.list(),

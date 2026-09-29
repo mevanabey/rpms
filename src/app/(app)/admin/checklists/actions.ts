@@ -10,6 +10,7 @@ import { importChecklistToBackend } from "@/lib/checklist/import";
 import type { ScheduleBlock } from "@/lib/checklist/parse";
 import type { ChecklistImportResult } from "@/lib/checklist/result";
 import { getBackend } from "@/server/container";
+import { requireResource } from "@/lib/auth/authorization";
 
 export interface ChecklistInput {
   fields: ChecklistFields;
@@ -23,6 +24,7 @@ export interface ChecklistInput {
  * revalidate the affected routes.
  */
 export async function importChecklist(input: ChecklistInput): Promise<ChecklistImportResult> {
+  await requireResource("admin:import");
   const result = await importOne(input);
   await revalidateBackend();
   return result;
@@ -35,6 +37,7 @@ export async function importChecklist(input: ChecklistInput): Promise<ChecklistI
 export async function importChecklistBatch(inputs: ChecklistInput[]): Promise<{
   results: Array<{ ok: true; data: ChecklistImportResult } | { ok: false; error: string }>;
 }> {
+  await requireResource("admin:import");
   const results: Array<{ ok: true; data: ChecklistImportResult } | { ok: false; error: string }> = [];
   for (const input of inputs) {
     try {

@@ -1,3 +1,4 @@
+import { requireResource } from "@/lib/auth/authorization";
 import { AlertTriangle, CheckCircle2, ListChecks, Wrench } from "lucide-react";
 
 import { NewTicketButton } from "@/components/app/forms/new-ticket-button";
@@ -8,6 +9,7 @@ import { TicketsList } from "./_components/tickets-list";
 import { MaintenanceStats } from "./_components/maintenance-stats";
 
 export default async function MaintenancePage() {
+  await requireResource("maintenance:read");
   const backend = getBackend();
   const [properties, units] = await Promise.all([
     backend.properties.listProperties(),

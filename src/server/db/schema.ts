@@ -358,9 +358,15 @@ export const leasePartyRoleTable = pgTable(
     partyId: uuid("party_id")
       .notNull()
       .references(() => party.id, { onDelete: "restrict" }),
+    // Present only for a participant with an RPMS login. External contacts
+    // retain the party record without receiving application access.
+    userId: uuid("user_id"),
     role: partyRoleEnum("role").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.leaseId, t.partyId, t.role] })],
+  (t) => [
+    primaryKey({ columns: [t.leaseId, t.partyId, t.role] }),
+    index("lease_party_role_user_idx").on(t.userId),
+  ],
 );
 
 export const rentScheduleTranche = pgTable(

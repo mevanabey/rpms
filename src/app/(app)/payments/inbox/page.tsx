@@ -1,9 +1,11 @@
+import { requireResource } from "@/lib/auth/authorization";
 import { Inbox } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getBackend } from "@/server/container";
 
 export default async function ReconciliationInboxPage() {
+  await requireResource("payments:reconcile");
   const backend = getBackend();
   const queue = await backend.payments.inboxQueue();
 

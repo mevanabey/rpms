@@ -1,3 +1,4 @@
+import { requireResource } from "@/lib/auth/authorization";
 import Link from "next/link";
 
 import { Coins } from "lucide-react";
@@ -23,6 +24,7 @@ type IntroducerRow = {
 };
 
 export default async function CommissionsPage() {
+  await requireResource("commissions:read");
   const backend = getBackend();
   const [leases, parties] = await Promise.all([backend.leases.list(), backend.parties.list()]);
   const partyById = partyMap(parties);

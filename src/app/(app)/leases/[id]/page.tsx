@@ -31,11 +31,15 @@ import type { Money } from "@/core/types";
 import { partyMap, unitMap } from "@/lib/lookup";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getBackend } from "@/server/container";
+import { requireLeaseAccess } from "@/lib/auth/authorization";
+import { getAssignableStaff } from "@/lib/auth/staff";
+import { scopeByLease } from "@/lib/demo/scope";
 
 import { LeaseDetailActions } from "./_components/lease-detail-actions";
 import { LeaseEditBootstrap } from "./_components/lease-edit-bootstrap";
 import { LeaseDetailsTable } from "./_components/lease-details-table";
 import { LeaseProgressBlock } from "./_components/lease-progress-block";
+import { LeaseParticipants } from "./_components/lease-participants";
 import { LeaseViewSwitch } from "./_components/lease-view-switch";
 import { RecentLedgerTable } from "./_components/recent-ledger-table";
 
@@ -80,21 +84,32 @@ export default async function LeaseDetailPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
+  const user = await requireLeaseAccess(id);
   // The leases list links here with ?edit=1 for its row-level Edit action —
   // the lease detail page is the one and only place a lease is edited.
-  const startInEditMode = query.edit === "1";
+  const startInEditMode = (user.role === "admin" || user.role === "account_manager") && query.edit === "1";
   const backend = getBackend();
   const lease = await backend.leases.get(id);
   if (!lease) notFound();
 
-  const [parties, propertyAll, units, allObligations, allLedger, allLeases] = await Promise.all([
+  const [allParties, propertyAll, propertyUnits, allObligations, allLedger, allLeases, staff] = await Promise.all([
     backend.parties.list(),
     backend.properties.getProperty(lease.propertyId),
     backend.properties.listUnits(lease.propertyId),
     backend.payments.listObligations(lease.id),
     backend.payments.listLedger({ leaseId: lease.id }),
     backend.leases.list(),
+    user.role === "admin" || user.role === "account_manager" ? getAssignableStaff() : Promise.resolve([]),
   ]);
+  const visibleLeases = scopeByLease(user, allLeases, (item) => item.id);
+  const canEdit = user.role === "admin" || user.role === "account_manager";
+  const partyIds = new Set([
+    lease.lessorPartyId,
+    lease.lesseePartyId,
+    ...(lease.additionalRoles ?? []).map((item) => item.partyId),
+  ]);
+  const parties = canEdit ? allParties : allParties.filter((party) => partyIds.has(party.id));
+  const units = canEdit ? propertyUnits : propertyUnits.filter((unit) => lease.unitIds.includes(unit.id));
 
   const partyById = partyMap(parties);
   const unitById = unitMap(units);
@@ -105,9 +120,9 @@ export default async function LeaseDetailPage({
   // Sub-lease nesting — paired tenancies created from a single checklist
   // (or wired manually) carry parentLeaseId; surface both directions.
   const parentLease = lease.parentLeaseId
-    ? (allLeases.find((l) => l.id === lease.parentLeaseId) ?? null)
+    ? (visibleLeases.find((l) => l.id === lease.parentLeaseId) ?? null)
     : null;
-  const childLeases = allLeases.filter((l) => l.parentLeaseId === lease.id);
+  const childLeases = visibleLeases.filter((l) => l.parentLeaseId === lease.id);
   const parentLessee = parentLease ? partyById.get(parentLease.lesseePartyId) : undefined;
 
   const upcoming = allObligations
@@ -189,7 +204,7 @@ export default async function LeaseDetailPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <LeaseDetailActions lease={lease} parties={parties} />
+            {canEdit && <LeaseDetailActions lease={lease} parties={parties} />}
           </div>
         </div>
       </div>
@@ -284,7 +299,7 @@ export default async function LeaseDetailPage({
         </Card>
       </div>
 
-      <LeaseProgressBlock
+      {canEdit && <LeaseProgressBlock
         leaseId={lease.id}
         status={lease.status}
         onboardingStage={lease.onboardingStage}
@@ -299,7 +314,10 @@ export default async function LeaseDetailPage({
         paymentCadence={lease.paymentCadence}
         serverPaidEntryIds={serverPaidEntryIds}
         today={today}
-      />
+      />}
+
+      <LeaseParticipants lease={lease} parties={parties} staff={staff}
+        canEdit={canEdit} />
 
       {/* Below the progress block, the operator can toggle between the rich
           default layout and a compact two-column "details" table. The rent
@@ -690,6 +708,7 @@ export default async function LeaseDetailPage({
         parties={parties}
         property={propertyAll ?? undefined}
         units={units}
+        readOnly={!canEdit}
       />
     </div>
     </LeaseScopeGate>

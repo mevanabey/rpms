@@ -21,6 +21,8 @@ import type { Currency } from "@/core/types";
 import { leasePartyByRole, partyMap, propertyMap } from "@/lib/lookup";
 import { formatCurrency } from "@/lib/utils";
 import { getBackend } from "@/server/container";
+import { requireAppUser } from "@/lib/auth/identity";
+import { scopeByLease } from "@/lib/demo/scope";
 
 import { RentBoard, type RentRow } from "./rent/_components/rent-board";
 
@@ -36,13 +38,25 @@ function formatLkrUsd(totals: Record<Currency, number>): string {
 }
 
 export default async function Home() {
+  const user = await requireAppUser();
+  const canViewRent = ["admin", "account_manager", "accountant"].includes(user.role);
   const backend = getBackend();
-  const [leases, parties, properties, ledger] = await Promise.all([
+  const [allLeases, allParties, allProperties, allLedger] = await Promise.all([
     backend.leases.list(),
     backend.parties.list(),
     backend.properties.listProperties(),
-    backend.payments.listLedger({ kind: ["rent"] }),
+    canViewRent ? backend.payments.listLedger({ kind: ["rent"] }) : Promise.resolve([]),
   ]);
+  const leases = scopeByLease(user, allLeases, (lease) => lease.id);
+  const visibleIds = new Set(leases.map((lease) => lease.id));
+  const ledger = allLedger.filter((entry) => visibleIds.has(entry.leaseId));
+  const propertyIds = new Set(leases.map((lease) => lease.propertyId));
+  const properties = allProperties.filter((property) => propertyIds.has(property.id));
+  const partyIds = new Set(leases.flatMap((lease) => [
+    lease.lessorPartyId, lease.lesseePartyId,
+    ...(lease.additionalRoles ?? []).map((role) => role.partyId),
+  ]));
+  const parties = allParties.filter((party) => partyIds.has(party.id));
 
   const activeLeases = leases.filter(
     (l) => l.status === "active" || l.status === "signed" || l.status === "grace",
@@ -106,7 +120,7 @@ export default async function Home() {
       icon: CheckCircle2,
       href: "/rent",
     },
-  ];
+  ].filter((k) => canViewRent || k.label === "Active leases");
 
   const leaseById = new Map(leases.map((l) => [l.id, l]));
   const partyById = partyMap(parties);
@@ -136,11 +150,11 @@ export default async function Home() {
             Snapshot <span className="font-mono">{TODAY}</span>.
           </p>
         </div>
-        <Button asChild variant="outline" size="sm">
+        {(user.role === "admin" || user.role === "account_manager") && <Button asChild variant="outline" size="sm">
           <Link href="/leases/new">
             <Sparkles className="size-3.5" /> Onboard new tenant
           </Link>
-        </Button>
+        </Button>}
       </div>
 
       <div
@@ -165,9 +179,9 @@ export default async function Home() {
         ))}
       </div>
 
-      <div data-onborda="dashboard-leases">
+      {canViewRent && <div data-onborda="dashboard-leases">
         <RentBoard rows={rentRows} showHeader={false} showSummary={false} />
-      </div>
+      </div>}
     </div>
   );
 }

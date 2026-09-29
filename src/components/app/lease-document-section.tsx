@@ -36,6 +36,7 @@ export function LeaseDocumentSection({
   property,
   units,
   defaultOpen = false,
+  readOnly = false,
 }: {
   lease: Lease;
   parties: Party[];
@@ -45,6 +46,7 @@ export function LeaseDocumentSection({
    *  carries a "View agreement" button, so the heavy preview shouldn't
    *  expand on first paint. Defaults to false. */
   defaultOpen?: boolean;
+  readOnly?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const user = useCurrentUser();
@@ -135,9 +137,9 @@ export function LeaseDocumentSection({
               <Download className="size-3.5" />
               {downloading ? "Preparing…" : "Download .docx"}
             </Button>
-            <Button size="sm" onClick={handleSend}>
+            {!readOnly && <Button size="sm" onClick={handleSend}>
               <Send className="size-3.5" /> Send for signature
-            </Button>
+            </Button>}
             <Button
               size="icon-sm"
               variant="ghost"
@@ -155,11 +157,11 @@ export function LeaseDocumentSection({
       {open && (
         <Card>
           <CardContent className="px-0">
-            <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr]">
+            <div className={readOnly ? "grid grid-cols-1" : "grid grid-cols-1 lg:grid-cols-[2fr_1fr]"}>
               <div className="border-b lg:border-r lg:border-b-0">
                 <LeaseDocumentPreview data={data} settings={settings} className="h-[640px]" />
               </div>
-              <div className="flex flex-col gap-4 p-4">
+              {!readOnly && <div className="flex flex-col gap-4 p-4">
                 <div className="flex flex-col gap-1">
                   <h3 className="flex items-center gap-2 font-medium text-sm">
                     <FileCheck2 className="size-4" /> Sign as
@@ -197,7 +199,7 @@ export function LeaseDocumentSection({
                     {activeSig.by}
                   </p>
                 )}
-              </div>
+              </div>}
             </div>
           </CardContent>
         </Card>

@@ -1,3 +1,4 @@
+import { requireResource } from "@/lib/auth/authorization";
 import Link from "next/link";
 
 import { Mail, Phone } from "lucide-react";
@@ -44,6 +45,7 @@ function leasesForParty(party: Party, leases: Lease[]): number {
 }
 
 export default async function PartiesPage() {
+  await requireResource("parties:read");
   const backend = getBackend();
   const [parties, leases] = await Promise.all([
     backend.parties.list(),

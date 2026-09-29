@@ -1,163 +1,72 @@
-"use client";
-
 import Link from "next/link";
+import type { User } from "@supabase/supabase-js";
+import { isNotNull } from "drizzle-orm";
 
-import { Plus, ShieldAlert } from "lucide-react";
-import { toast } from "sonner";
-
-import { RoleGate } from "@/components/app/role-gate";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { requireResource } from "@/lib/auth/authorization";
+import { DEFAULT_ROLES } from "@/lib/demo/identity";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { db } from "@/server/db/client";
+import { leasePartyRoleTable, userRole } from "@/server/db/schema";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { useDemoStore } from "@/lib/demo/store";
-import { PRESET_USERS } from "@/lib/demo/identity";
-import { useCurrentUser, useRoleDef } from "@/lib/demo/use-store";
-import { getInitials } from "@/lib/utils";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-import { RolePill } from "@/components/app/role-pill";
-
-export default function UsersPage() {
-  const me = useCurrentUser();
-  const loginAs = useDemoStore((s) => s.loginAs);
-  // const pushActivity = useDemoStore((s) => s.pushActivity); // activity log disabled
+export default async function UsersPage() {
+  await requireResource("admin:users");
+  const authUsers: User[] = [];
+  for (let page = 1; ; page += 1) {
+    const { data, error } = await getSupabaseAdmin().auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(`Could not list users: ${error.message}`);
+    authUsers.push(...data.users);
+    if (data.users.length < 1000) break;
+  }
+  const [roles, assignments] = await Promise.all([
+    db.select().from(userRole),
+    db.select({ userId: leasePartyRoleTable.userId, leaseId: leasePartyRoleTable.leaseId })
+      .from(leasePartyRoleTable).where(isNotNull(leasePartyRoleTable.userId)),
+  ]);
+  const roleById = new Map(roles.map((row) => [row.userId, row]));
+  const leaseIdsByUser = new Map<string, Set<string>>();
+  for (const assignment of assignments) {
+    if (!assignment.userId) continue;
+    const ids = leaseIdsByUser.get(assignment.userId) ?? new Set<string>();
+    ids.add(assignment.leaseId);
+    leaseIdsByUser.set(assignment.userId, ids);
+  }
+  const labels = new Map(DEFAULT_ROLES.map((role) => [role.id, role.label]));
 
   return (
-    <RoleGate required={["admin:users"]}>
-      <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="font-bold text-2xl tracking-tight">Users</h1>
-            <p className="mt-1 text-muted-foreground text-sm">
-              Capital Trust group staff + role mapping. Clerk wires up in Phase 02.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button asChild variant="outline" size="sm">
-              <Link href="/admin/access">
-                <ShieldAlert className="size-3.5" /> Open RBAC matrix
-              </Link>
-            </Button>
-            <Button size="sm" disabled>
-              <Plus className="size-4" /> Invite
-            </Button>
-          </div>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Members</CardTitle>
-            <CardDescription>
-              Role + entity scope drive sidebar visibility, mutation
-              authorization, and RLS scoping. Click “Sign in as” to simulate
-              that user during the demo.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="px-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Entities</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {PRESET_USERS.map((u) => {
-                  const isMe = me?.id === u.id;
-                  return (
-                    <TableRow key={u.id} className={isMe ? "bg-muted/40" : ""}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Avatar className="size-7">
-                            <AvatarFallback className="text-xs">
-                              {u.initials ?? getInitials(u.name)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <div className="font-medium">{u.name}</div>
-                            {isMe && (
-                              <div className="text-emerald-700 text-[10px] dark:text-emerald-300">
-                                signed in
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs">
-                        {u.email}
-                      </TableCell>
-                      <TableCell>
-                        <RolePill role={u.role} withTooltip />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {u.entities.map((e) => (
-                            <Badge key={e} variant="outline" className="font-mono text-[10px]">
-                              {e}
-                            </Badge>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-                        >
-                          active
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isMe}
-                          onClick={() => {
-                            const label =
-                              useDemoStore
-                                .getState()
-                                .roleDefs.find((r) => r.id === u.role)?.label ?? u.role;
-                            loginAs(u.id);
-                            // Activity log disabled — app simplified.
-                            // pushActivity({
-                            //   workflow: "human",
-                            //   severity: "info",
-                            //   title: `Switched user → ${u.name}`,
-                            //   body: `Now signed in as ${label}.`,
-                            // });
-                            toast.success(`Now signed in as ${u.name}`, {
-                              description: `Role · ${label}.`,
-                            });
-                          }}
-                        >
-                          {isMe ? "Current" : "Sign in as"}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+    <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
+      <div>
+        <h1 className="font-bold text-2xl tracking-tight">Users</h1>
+        <p className="mt-1 text-muted-foreground text-sm">Supabase accounts and their RPMS access. Assign lawyers, accountants, and advisors from a lease’s Team & contacts section.</p>
       </div>
-    </RoleGate>
+      <Card>
+        <CardHeader>
+          <CardTitle>System users</CardTitle>
+          <CardDescription>External contacts live in Parties and have no login access. Staff lease access requires an explicit system-user assignment.</CardDescription>
+        </CardHeader>
+        <CardContent className="px-0">
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>User</TableHead><TableHead>App role</TableHead><TableHead>Linked contact</TableHead><TableHead>Leases</TableHead><TableHead>Status</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {authUsers.filter((user) => user.email).sort((a, b) => a.email!.localeCompare(b.email!)).map((user) => {
+                const row = roleById.get(user.id);
+                const name = String(user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email!.split("@")[0]);
+                return <TableRow key={user.id}>
+                  <TableCell><div className="font-medium">{name}</div><div className="text-xs text-muted-foreground">{user.email}</div></TableCell>
+                  <TableCell>{row ? labels.get(row.role) ?? row.role : "No RPMS role"}</TableCell>
+                  <TableCell>{row?.partyId ? <Link className="text-primary hover:underline" href={`/parties/${row.partyId}`}>View contact</Link> : "—"}</TableCell>
+                  <TableCell>{leaseIdsByUser.get(user.id)?.size ?? 0}</TableCell>
+                  <TableCell><Badge variant="outline">{row?.isActive ? "Active" : "Inactive"}</Badge></TableCell>
+                </TableRow>;
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

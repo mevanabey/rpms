@@ -1,3 +1,4 @@
+import { requireResource } from "@/lib/auth/authorization";
 import Link from "next/link";
 
 import { MoneyDisplay } from "@/components/app/money-display";
@@ -21,6 +22,7 @@ type EscalationRow = {
 };
 
 export default async function EscalationsPage() {
+  await requireResource("reports:read");
   const backend = getBackend();
   const [leases, properties] = await Promise.all([
     backend.leases.list(),

@@ -1,11 +1,17 @@
 import "server-only";
 import { cache } from "react";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { getAuthUser } from "@/lib/supabase/auth";
 import type { AppUser, Role } from "@/lib/demo/identity";
 import { db } from "@/server/db/client";
-import { userRole as userRoleTable } from "@/server/db/schema";
+import { leasePartyRoleTable, userRole as userRoleTable } from "@/server/db/schema";
+
+const PARTICIPANT_ROLES = {
+  lawyer: ["lessor_lawyer", "lessee_lawyer"],
+  accountant: ["accountant_handler"],
+  advisor: ["advisor"],
+} as const;
 
 /**
  * Roles known to the permissions matrix in `src/lib/demo/identity.ts`.
@@ -101,6 +107,17 @@ export const getCurrentAppUser = cache(async (): Promise<AppUser | null> => {
     .join("")
     .slice(0, 2);
 
+  const participantRoles = PARTICIPANT_ROLES[row.role as keyof typeof PARTICIPANT_ROLES];
+  const assignments = participantRoles
+    ? await db
+        .select({ leaseId: leasePartyRoleTable.leaseId })
+        .from(leasePartyRoleTable)
+        .where(and(
+          eq(leasePartyRoleTable.userId, sbUser.id),
+          inArray(leasePartyRoleTable.role, [...participantRoles]),
+        ))
+    : [];
+
   return {
     id: sbUser.id,
     name,
@@ -109,7 +126,7 @@ export const getCurrentAppUser = cache(async (): Promise<AppUser | null> => {
     entities: row.entities ?? [],
     initials,
     partyId: row.partyId ?? undefined,
-    assignedLeaseIds: row.assignedLeaseIds ?? undefined,
+    assignedLeaseIds: assignments.map((assignment) => assignment.leaseId),
   };
 });
 

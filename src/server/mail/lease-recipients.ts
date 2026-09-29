@@ -39,6 +39,7 @@ export function resolveLeaseRecipients(
   lease: Lease,
   kind: LeaseEmailKind,
   partyById: Map<string, Party>,
+  linkedUsers: Map<string, MailAddress> = new Map(),
 ): MailAddress[] {
   const roles = new Set<PartyRole>(ROLES_FOR[kind]);
   const seen = new Set<string>();
@@ -47,13 +48,16 @@ export function resolveLeaseRecipients(
   for (const ref of lease.additionalRoles ?? []) {
     if (!roles.has(ref.role)) continue;
     const party = partyById.get(ref.partyId);
-    if (!party) continue;
-    for (const raw of party.emails ?? []) {
+    const account = ref.userId ? linkedUsers.get(ref.userId) : undefined;
+    // A linked system user receives mail at their verified Auth address.
+    // External contacts receive mail at the addresses on their party record.
+    const addresses = ref.userId ? (account ? [account.email] : []) : (party?.emails ?? []);
+    for (const raw of addresses) {
       const email = raw.trim();
       const key = email.toLowerCase();
       if (!isEmail(email) || seen.has(key)) continue;
       seen.add(key);
-      out.push({ email, name: party.displayName });
+      out.push({ email, name: account?.name ?? party?.displayName });
     }
   }
 

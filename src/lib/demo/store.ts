@@ -537,7 +537,27 @@ export const useDemoStore = create<DemoStore>()(
     }),
     {
       name: "rpms-demo-state",
-      version: 1,
+      version: 2,
+      migrate: (persistedState) => {
+        const saved = persistedState as DemoState;
+        const roles = saved.roleDefs ?? [];
+        return {
+          ...saved,
+          roleDefs: [
+            ...roles.filter((role) => !["lawyer", "accountant", "advisor", "viewer"].includes(role.id)),
+            ...DEFAULT_ROLES.filter((role) => ["lawyer", "accountant", "advisor", "viewer"].includes(role.id)),
+          ],
+          permissions: {
+            ...saved.permissions,
+            lawyer: [...DEFAULT_PERMISSIONS.lawyer],
+            accountant: [...DEFAULT_PERMISSIONS.accountant],
+            advisor: [...DEFAULT_PERMISSIONS.advisor],
+            viewer: [],
+          },
+          tourCompletedAt: saved.tourCompletedAt,
+          lastTickAt: saved.lastTickAt,
+        };
+      },
       partialize: (state) => ({
         activities: state.activities,
         approvals: state.approvals,

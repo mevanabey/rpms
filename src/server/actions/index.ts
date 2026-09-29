@@ -16,6 +16,7 @@ import type {
   UnitCreateInput,
 } from "@/core/services";
 import type { LedgerEntry, Lease, LeaseStatus, OnboardingStage, Party, Property, Unit } from "@/core/types";
+import type { LeasePartyRole } from "@/core/types";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -25,6 +26,7 @@ import PizZip from "pizzip";
 import { buildLeaseChecklistWorkbook } from "@/lib/checklist/export";
 import { partyMap } from "@/lib/lookup";
 import { requireAppUser } from "@/lib/auth/identity";
+import { requireLeaseAccess } from "@/lib/auth/authorization";
 import { LEASE_DOCUMENTS_BUCKET, getSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildDataDict } from "@/templates/leases/lease-template-render";
 import {
@@ -37,6 +39,10 @@ import {
   type Resource,
 } from "@/lib/demo/identity";
 import { getBackend } from "@/server/container";
+import { db } from "@/server/db/client";
+import { ledgerEntry as ledgerEntryTable, party as partyTable, userRole as userRoleTable } from "@/server/db/schema";
+import { eq, inArray, sql } from "drizzle-orm";
+import { toParty } from "@/server/adapters/supabase/mappers";
 import { leaseClausesPatchSchema } from "@/server/validation/lease-clauses";
 import { getMailer } from "@/server/mail";
 import { resolveLeaseRecipients } from "@/server/mail/lease-recipients";
@@ -82,6 +88,16 @@ function fail(e: unknown): { ok: false; error: string } {
   return { ok: false, error: cleaned };
 }
 
+async function requireLedgerAccess(ledgerEntryId: string): Promise<void> {
+  const [entry] = await db
+    .select({ leaseId: ledgerEntryTable.leaseId })
+    .from(ledgerEntryTable)
+    .where(eq(ledgerEntryTable.id, ledgerEntryId))
+    .limit(1);
+  if (!entry) throw new Error("Ledger entry not found.");
+  await requireLeaseAccess(entry.leaseId, "payments:write");
+}
+
 /**
  * Server-side RBAC. The permission matrix lives in
  * `src/lib/demo/identity.ts` and is the same map the client RoleGate /
@@ -100,6 +116,27 @@ async function authorizeWrite(resource: Resource): Promise<AppUser> {
     );
   }
   return user;
+}
+
+const ASSIGNMENT_ROLES: Record<string, readonly string[]> = {
+  lawyer: ["lessor_lawyer", "lessee_lawyer"],
+  accountant: ["accountant_handler"],
+  advisor: ["advisor"],
+};
+
+async function validateParticipants(roles: LeasePartyRole[] | undefined): Promise<void> {
+  const linked = roles?.filter((role) => role.userId) ?? [];
+  if (linked.length === 0) return;
+  const ids = [...new Set(linked.map((role) => role.userId!))];
+  const users = await db.select().from(userRoleTable).where(inArray(userRoleTable.userId, ids));
+  const byId = new Map(users.map((user) => [user.userId, user]));
+  for (const participant of linked) {
+    const user = byId.get(participant.userId!);
+    if (!user?.isActive || user.partyId !== participant.partyId ||
+        !ASSIGNMENT_ROLES[user.role]?.includes(participant.role)) {
+      throw new Error("A system user must have a matching role and linked party before assignment.");
+    }
+  }
 }
 
 // ──────────────────────────────────────────────── Schemas
@@ -227,7 +264,7 @@ const leaseCreateSchema = z
     legalFees: moneyShape.optional(),
     clauses: z.record(z.string(), z.unknown()).optional(),
     additionalRoles: z
-      .array(z.object({ partyId: z.string().uuid(), role: partyRoleEnum }))
+      .array(z.object({ partyId: z.string().uuid(), role: partyRoleEnum, userId: z.string().uuid().optional() }))
       .optional(),
     tranches: z.array(trancheShape).min(1),
     legalEntityCode: z.string().optional(),
@@ -269,6 +306,7 @@ const leaseUpdateSchema = z
           .object({
             partyId: z.string().uuid(),
             role: z.enum(PARTY_ROLES),
+            userId: z.string().uuid().optional(),
           })
           .strict(),
       )
@@ -333,6 +371,65 @@ const markPaidSchema = z
 
 // ──────────────────────────────────────────────── Actions
 
+/** Explicitly link an existing Auth account to a contact record. No email matching. */
+export async function prepareStaffPartyAction(
+  userId: string,
+  role: "lawyer" | "accountant" | "advisor",
+  existingPartyId?: string,
+): Promise<ActionResult<Party>> {
+  try {
+    await authorizeWrite("leases:write");
+    z.string().uuid().parse(userId);
+    if (existingPartyId) z.string().uuid().parse(existingPartyId);
+    if (!ASSIGNMENT_ROLES[role]) throw new Error("Invalid staff role.");
+    const { data, error } = await getSupabaseAdmin().auth.admin.getUserById(userId);
+    if (error || !data.user?.email) throw new Error("System user not found.");
+    const authUser = data.user;
+    const name = String(authUser.user_metadata?.full_name ?? authUser.user_metadata?.name ?? authUser.email!.split("@")[0]);
+    const contact = await db.transaction(async (tx) => {
+      await tx.execute(sql`select user_id from user_role where user_id = ${userId} for update`);
+      const [linked] = await tx.select().from(userRoleTable).where(eq(userRoleTable.userId, userId)).limit(1);
+      if (!linked?.isActive || linked.role !== role) {
+        throw new Error("Select an active system user with the matching role.");
+      }
+      if (linked.partyId) {
+        if (existingPartyId && existingPartyId !== linked.partyId) {
+          throw new Error("This system user is already linked to a different contact.");
+        }
+        const [existing] = await tx.select().from(partyTable).where(eq(partyTable.id, linked.partyId)).limit(1);
+        if (!existing) throw new Error("The linked contact no longer exists.");
+        return toParty(existing);
+      }
+      if (existingPartyId) {
+        const [existing] = await tx.select().from(partyTable).where(eq(partyTable.id, existingPartyId)).limit(1);
+        if (!existing || existing.kind !== "individual") throw new Error("Select an individual contact to link.");
+        const otherLinks = await tx.select({ userId: userRoleTable.userId }).from(userRoleTable)
+          .where(eq(userRoleTable.partyId, existingPartyId));
+        if (otherLinks.some((link) => link.userId !== userId)) {
+          throw new Error("This contact is already linked to another account.");
+        }
+        await tx.update(userRoleTable).set({ partyId: existing.id, updatedAt: new Date() })
+          .where(eq(userRoleTable.userId, userId));
+        return toParty(existing);
+      }
+      const [created] = await tx.insert(partyTable).values({
+        kind: "individual",
+        displayName: name,
+        emails: [authUser.email!],
+        phones: [],
+      }).returning();
+      if (!created) throw new Error("Could not create staff contact.");
+      await tx.update(userRoleTable).set({ partyId: created.id, updatedAt: new Date() })
+        .where(eq(userRoleTable.userId, userId));
+      return toParty(created);
+    });
+    revalidateAll();
+    return { ok: true, data: contact };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 export async function createPartyAction(
   input: PartyCreateInput,
 ): Promise<ActionResult<Party>> {
@@ -383,6 +480,7 @@ export async function createLeaseAction(
   try {
     await authorizeWrite("leases:create");
     const parsed = leaseCreateSchema.parse(intent);
+    await validateParticipants(parsed.additionalRoles);
     const data = await getBackend().leases.create(parsed as LeaseCreateIntent);
     revalidateAll();
     return { ok: true, data };
@@ -396,8 +494,8 @@ export async function updateLeaseStatusAction(
   status: LeaseStatus,
 ): Promise<ActionResult<Lease>> {
   try {
-    await authorizeWrite("leases:write");
     z.string().uuid().parse(id);
+    await requireLeaseAccess(id, "leases:write");
     const data = await getBackend().leases.updateStatus(id, status);
     revalidateLease(id);
     return { ok: true, data };
@@ -411,9 +509,10 @@ export async function updateLeaseAction(
   patch: LeaseUpdateInput,
 ): Promise<ActionResult<Lease>> {
   try {
-    await authorizeWrite("leases:write");
     z.string().uuid().parse(id);
+    await requireLeaseAccess(id, "leases:write");
     const parsed = leaseUpdateSchema.parse(patch);
+    await validateParticipants(parsed.additionalRoles);
     const data = await getBackend().leases.update(id, parsed as LeaseUpdateInput);
     revalidateLease(id);
     return { ok: true, data };
@@ -433,8 +532,8 @@ export async function updateLeaseTrancheAction(
   patch: TrancheUpdateInput,
 ): Promise<ActionResult<Lease>> {
   try {
-    await authorizeWrite("leases:write");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "leases:write");
     z.string().uuid().parse(trancheId);
     const parsed = trancheUpdateSchema.parse(patch);
     const data = await getBackend().leases.updateTranche(
@@ -493,8 +592,8 @@ export async function deleteLeaseAction(
   id: string,
 ): Promise<ActionResult<{ id: string }>> {
   try {
-    await authorizeWrite("leases:write");
     z.string().uuid().parse(id);
+    await requireLeaseAccess(id, "leases:write");
     await getBackend().leases.softDelete(id);
     revalidateLease(id);
     return { ok: true, data: { id } };
@@ -510,8 +609,8 @@ export async function setLeaseOnboardingStageAction(
   stage: OnboardingStage | null,
 ): Promise<ActionResult<Lease>> {
   try {
-    await authorizeWrite("leases:write");
     z.string().uuid().parse(id);
+    await requireLeaseAccess(id, "leases:write");
     if (stage !== null && !VALID_STAGES.has(stage)) {
       throw new Error(`Invalid onboarding stage: ${stage}`);
     }
@@ -540,8 +639,8 @@ export async function generateLeaseAgreementAction(
   leaseId: string,
 ): Promise<ActionResult<{ lease: Lease; url: string; path: string }>> {
   try {
-    await authorizeWrite("leases:write");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "leases:write");
 
     const backend = getBackend();
     const lease = await backend.leases.get(leaseId);
@@ -596,8 +695,8 @@ export async function uploadLeaseAgreementAction(
   formData: FormData,
 ): Promise<ActionResult<Lease>> {
   try {
-    await authorizeWrite("leases:write");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "leases:write");
     const file = formData.get("file");
     if (!(file instanceof File)) throw new Error("No file provided.");
     if (file.size === 0) throw new Error("Uploaded file is empty.");
@@ -635,8 +734,8 @@ export async function markLeaseAgreementGeneratedAction(
   storagePath: string,
 ): Promise<ActionResult<Lease>> {
   try {
-    await authorizeWrite("leases:write");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "leases:write");
     z.string().min(1).parse(storagePath);
     const data = await getBackend().leases.markAgreementGenerated(leaseId, storagePath);
     revalidateLease(leaseId);
@@ -659,8 +758,8 @@ export async function sendLeaseEmailAction(
   kind: "lawyer" | "advisor" | "accounts",
 ): Promise<ActionResult<Lease & { emailedTo: string[]; redirected: boolean }>> {
   try {
-    const user = await authorizeWrite("leases:write");
     z.string().uuid().parse(leaseId);
+    const user = await requireLeaseAccess(leaseId, "leases:write");
     if (kind !== "lawyer" && kind !== "advisor" && kind !== "accounts") {
       throw new Error(`Invalid email kind: ${kind}`);
     }
@@ -675,7 +774,17 @@ export async function sendLeaseEmailAction(
       backend.properties.listUnits(lease.propertyId),
     ]);
     const byId = partyMap(parties);
-    const to = resolveLeaseRecipients(lease, kind, byId);
+    const linkedUsers = new Map<string, { email: string; name?: string }>();
+    const staffIds = [...new Set((lease.additionalRoles ?? []).flatMap((role) => role.userId ? [role.userId] : []))];
+    await Promise.all(staffIds.map(async (id) => {
+      const { data, error } = await getSupabaseAdmin().auth.admin.getUserById(id);
+      if (error || !data.user?.email) throw new Error("A linked system user no longer has an email address.");
+      linkedUsers.set(id, {
+        email: data.user.email,
+        name: String(data.user.user_metadata?.full_name ?? data.user.user_metadata?.name ?? data.user.email.split("@")[0]),
+      });
+    }));
+    const to = resolveLeaseRecipients(lease, kind, byId, linkedUsers);
 
     const attachments = await loadAgreementAttachment(lease);
     const body = buildLeaseEmail({
@@ -764,8 +873,8 @@ export async function markLeaseActiveAction(
   leaseId: string,
 ): Promise<ActionResult<Lease & { rentEntriesCreated: number }>> {
   try {
-    await authorizeWrite("leases:write");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "leases:write");
     const backend = getBackend();
     const data = await backend.leases.markLeaseActive(leaseId);
     // Pre-create the unpaid monthly rent ledger entries so the Rent /
@@ -788,8 +897,8 @@ export async function generateRentScheduleAction(
   leaseId: string,
 ): Promise<ActionResult<{ created: number; skipped: number }>> {
   try {
-    await authorizeWrite("leases:write");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "leases:write");
     const result = await getBackend().leases.generateRentSchedule(leaseId);
     revalidateLease(leaseId);
     return { ok: true, data: result };
@@ -802,8 +911,8 @@ export async function getLeaseAgreementUrlAction(
   leaseId: string,
 ): Promise<ActionResult<{ url: string; path: string }>> {
   try {
-    await authorizeWrite("leases:read");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "leases:read");
     const lease = await getBackend().leases.get(leaseId);
     if (!lease) throw new Error(`Lease ${leaseId} not found`);
     if (!lease.agreementPath) throw new Error("No lease agreement has been generated or uploaded yet.");
@@ -830,8 +939,8 @@ export async function uploadSignedLeaseAction(
   formData: FormData,
 ): Promise<ActionResult<Lease>> {
   try {
-    await authorizeWrite("leases:write");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "leases:write");
     const file = formData.get("file");
     if (!(file instanceof File)) {
       throw new Error("No file provided.");
@@ -877,8 +986,8 @@ export async function exportLeaseChecklistAction(
   leaseId: string,
 ): Promise<ActionResult<{ fileName: string; base64: string }>> {
   try {
-    await authorizeWrite("leases:read");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "leases:read");
 
     const backend = getBackend();
     const lease = await backend.leases.get(leaseId);
@@ -905,8 +1014,8 @@ export async function getSignedLeaseUrlAction(
   leaseId: string,
 ): Promise<ActionResult<{ url: string; path: string }>> {
   try {
-    await authorizeWrite("leases:read");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "leases:read");
     const lease = await getBackend().leases.get(leaseId);
     if (!lease) throw new Error(`Lease ${leaseId} not found`);
     if (!lease.signedLeasePath) throw new Error("No signed lease has been uploaded for this lease.");
@@ -927,8 +1036,8 @@ export async function loadLeaseDocumentDataAction(
   leaseId: string,
 ): Promise<ActionResult<LeaseDocumentData>> {
   try {
-    await authorizeWrite("leases:read");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "leases:read");
     const backend = getBackend();
     const lease = await backend.leases.get(leaseId);
     if (!lease) {
@@ -951,8 +1060,8 @@ export async function markRentPaidAction(
   input: MarkPaidInput,
 ): Promise<ActionResult<LedgerEntry>> {
   try {
-    await authorizeWrite("payments:write");
     z.string().uuid().parse(ledgerEntryId);
+    await requireLedgerAccess(ledgerEntryId);
     const parsed = markPaidSchema.parse(input);
     const data = await getBackend().payments.markPaid(
       ledgerEntryId,
@@ -969,8 +1078,8 @@ export async function unmarkRentPaidAction(
   ledgerEntryId: string,
 ): Promise<ActionResult<LedgerEntry>> {
   try {
-    await authorizeWrite("payments:write");
     z.string().uuid().parse(ledgerEntryId);
+    await requireLedgerAccess(ledgerEntryId);
     const data = await getBackend().payments.unmarkPaid(ledgerEntryId);
     revalidateLease(data.leaseId);
     return { ok: true, data };
@@ -984,8 +1093,8 @@ export async function markNextRentPaidAction(
   input: MarkPaidInput,
 ): Promise<ActionResult<LedgerEntry>> {
   try {
-    await authorizeWrite("payments:write");
     z.string().uuid().parse(leaseId);
+    await requireLeaseAccess(leaseId, "payments:write");
     const parsed = markPaidSchema.parse(input);
     const data = await getBackend().payments.markNextRentPaid(
       leaseId,

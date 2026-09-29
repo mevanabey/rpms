@@ -1,3 +1,4 @@
+import { requireResource } from "@/lib/auth/authorization";
 import Link from "next/link";
 
 import { Building2 } from "lucide-react";
@@ -10,6 +11,7 @@ import { getBackend } from "@/server/container";
 import { DraftPropertiesCard } from "./_components/draft-properties-card";
 
 export default async function PropertiesPage() {
+  await requireResource("properties:read");
   const backend = getBackend();
   const [properties, allUnits, allLeases] = await Promise.all([
     backend.properties.listProperties(),

@@ -29,8 +29,7 @@ export interface AppUser {
   entities: string[];
   initials?: string;
   partyId?: string;
-  /** Lawyers only — restricts visibility to these lease ids. Admins +
-   *  account managers see everything regardless of this value. */
+  /** Derived from explicit lease assignments for scoped staff roles. */
   assignedLeaseIds?: string[];
 }
 
@@ -121,7 +120,9 @@ export const ROLE_TONE_PRESETS: Array<{ id: string; label: string; cls: string }
 export const DEFAULT_ROLES: RoleDefinition[] = [
   { id: "admin", label: "Admin", description: "Full access — system, properties, leases, rent, and RBAC.", tone: ROLE_TONE_PRESETS[0].cls, builtin: true },
   { id: "account_manager", label: "Account Manager", description: "Day-to-day operator. Manages properties, leases, marks rent paid, and sends reminders.", tone: ROLE_TONE_PRESETS[1].cls, builtin: true },
-  { id: "lawyer", label: "Lawyer", description: "Sees only the tenants they are assigned to. Read-only on properties and leases.", tone: ROLE_TONE_PRESETS[3].cls, builtin: true },
+  { id: "lawyer", label: "Lawyer", description: "Read-only access to leases where they are assigned as a lawyer.", tone: ROLE_TONE_PRESETS[3].cls, builtin: true },
+  { id: "accountant", label: "Accountant", description: "Rent and payments for assigned leases only.", tone: ROLE_TONE_PRESETS[2].cls, builtin: true },
+  { id: "advisor", label: "Advisor", description: "Read-only access to assigned leases and documents.", tone: ROLE_TONE_PRESETS[5].cls, builtin: true },
   { id: "viewer", label: "Viewer", description: "Auto-provisioned default for new sign-ups. Admin must promote.", tone: ROLE_TONE_PRESETS[8].cls, builtin: true },
 ];
 
@@ -148,15 +149,9 @@ export const DEFAULT_PERMISSIONS: Record<Role, Resource[]> = {
     // Account managers own lease document templates day-to-day.
     "admin:templates",
   ],
-  lawyer: [
-    "properties:read",
-    "units:read",
-    "parties:read",
-    "leases:read",
-    "documents:read",
-    "documents:write",
-    "reports:read",
-  ],
+  lawyer: ["leases:read"],
+  accountant: ["leases:read", "payments:read", "payments:write"],
+  advisor: ["leases:read"],
   viewer: [],
 };
 

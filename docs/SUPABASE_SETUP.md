@@ -36,14 +36,10 @@ Session refresh runs in `proxy.ts` at the project root (Next.js 16 renamed `midd
 
 **Important** (per Next.js 16 docs): proxy is *not* a substitute for per-route authz. Server components and server actions must call `getAuthUser()` from `@/lib/supabase/auth` themselves and gate on the result.
 
-## 4. Database — next slice
+## 4. Database
 
-The Drizzle schema (`src/server/db/schema.ts`) and the `supabase` backend adapter (`src/server/adapters/supabase/`) are not yet implemented. Once they land:
-
-1. `pnpm db:generate` — emit SQL from the schema.
-2. `pnpm db:migrate` — apply migrations via `DIRECT_URL`.
-3. Flip `BACKEND=supabase` in `.env.local` to route `getBackend()` to the real adapter.
+The Drizzle schema and Supabase backend adapter are implemented. Set `DIRECT_URL`, then run `pnpm db:migrate` to apply the checked-in migrations. Set `BACKEND=supabase` for the real adapter.
 
 ## 5. RLS
 
-Row-level security is intentionally deferred until the schema stabilizes. App-layer enforcement (Drizzle `where` + `<RoleGate>` + `<LeaseScopeGate>`) is the first line for now; RLS will land as a follow-up, layered on top.
+Migration `0001` enables RLS on all application tables without browser-facing policies. RPMS reads and writes these tables through its server-only Drizzle connection; the browser Supabase client is used only for Auth. Lease pages and Server Actions check role and explicit `lease_party_role.user_id` assignments before returning data. Keep the database connection credentials server-only. Apply `0001` before deploying this version, then run `scripts/setup-scoped-staff.sql` in the Supabase SQL Editor. Assign the staff members to leases in **Team & contacts**; role assignment alone grants no lease access.

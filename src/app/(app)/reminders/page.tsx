@@ -1,3 +1,4 @@
+import { requireResource } from "@/lib/auth/authorization";
 import Link from "next/link";
 
 import { Bell, Mail, MessageSquare, Phone } from "lucide-react";
@@ -26,6 +27,7 @@ function urgency(days: number): { label: string; tone: string } {
 }
 
 export default async function RemindersPage() {
+  await requireResource("reminders:read");
   const backend = getBackend();
   const [obligations, leases, parties, queue] = await Promise.all([
     backend.payments.listObligations(),

@@ -1,3 +1,4 @@
+import { requireResource } from "@/lib/auth/authorization";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Currency } from "@/core/types";
 import { formatCurrency } from "@/lib/utils";
@@ -23,6 +24,7 @@ function monthsRange(start: string, end: string): string[] {
 }
 
 export default async function CashflowPage() {
+  await requireResource("reports:read");
   const backend = getBackend();
   const ledger = await backend.payments.listLedger();
 

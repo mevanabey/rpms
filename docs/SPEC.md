@@ -24,15 +24,18 @@ The full system described in §3–§21 is the long-term target. To avoid overwh
 | **Rent** | Single page showing every rent ledger line, bucketed `Overdue / Due in 14 days / Upcoming / Paid`. Each row has two operator actions: **Mark paid** (after the user has manually verified the bank credit) and **Send reminder** (queues an email to tenant + landlord on file). | Bank-reconciliation inbox, commissions, automated rent-collection cycle, full reminders queue. |
 | **Settings** (admin only) | Import, Templates, Workflows, Users, Access (RBAC matrix). | — |
 
-**Three roles only**
+**Current application roles**
 
 | Role | Sees | Can do |
 |---|---|---|
 | `admin` | Everything in the visible surface + Settings + RBAC + reset demo. | All actions. |
 | `account_manager` | Dashboard, Properties, Leases (all), Rent (all). | Create/edit properties, leases, units, parties; mark rent paid; send reminders. |
-| `lawyer` | Dashboard, Properties (read), Leases **scoped to `assignedLeaseIds`**, Rent **scoped to the same leases**. | Read-only on leases + documents. Cannot mark rent paid or send reminders. |
+| `lawyer` | Dashboard and assigned leases. | Read-only lease access. |
+| `accountant` | Dashboard, assigned leases and their payments. | Mark payments on assigned leases. |
+| `advisor` | Dashboard and assigned leases. | Read-only lease access. |
+| `viewer` | Empty dashboard until promoted. | No lease or payment access. |
 
-The legacy `handler` / `accountant` / `viewer` / `introducer` roles are removed from `DEFAULT_ROLES` (so the RBAC matrix only shows three columns) and from `PRESET_USERS` (so the login page only offers admin + account manager + two scoped lawyers). Resource strings like `commissions:*`, `maintenance:*`, `compliance:*`, `tasks:*`, `automation:*` stay in the catalogue so the deferred routes still compile, but no role grants them — the sidebar groups for them are commented out, not deleted.
+The lease's **Team & contacts** section distinguishes system users from external contacts. Only rows with a system user ID confer access; a party record alone never does.
 
 **Two demo overlays that make the MVP feel real**
 
@@ -643,7 +646,7 @@ Writing new steps in `src/lib/tour/steps.tsx` is the standard way to grow the to
 
 ## 21. RBAC, identity, and user simulation
 
-> **MVP carve-out (2026-05-13):** only three of the six roles below are active in the current build — `admin`, `account_manager`, and `lawyer`. The matrix at `/admin/access` only lists those three. The legacy roles in this section describe the target state, not what the client sees today. See §0.1.
+> **Current staff access:** `admin` and `account_manager` retain portfolio access. `lawyer`, `accountant`, and `advisor` are limited to leases explicitly linked to their Supabase user ID. `viewer` has no application permissions.
 
 The operator surface is a multi-role product. A handler shouldn't see admin tools, an introducer shouldn't see other introducers' commissions, an external auditor needs read-only across the portfolio. RBAC is built into the prototype from day one so every demo viewer can see *who can do what*.
 
@@ -653,16 +656,18 @@ The operator surface is a multi-role product. A handler shouldn't see admin tool
 |---|---|---|---|---|
 | `admin` | Capital Trust ops/IT lead | All | All — including RBAC + reset demo | ✅ |
 | `account_manager` | Day-to-day operator (Disna) | Dashboard, Properties, Leases (all), Rent (all). | Properties, units, parties, leases, rent (mark paid), reminders (send) | ✅ MVP |
-| `lawyer` | Drafts + reviews (Ruvini, Sulochana) — **scoped to `assignedLeaseIds`** | Leases + documents *for assigned tenants only*, properties:read | Read-only in MVP. Future: lease drafts, decisions. | ✅ MVP (scoped) |
+| `lawyer` | Drafts + reviews | Assigned leases and their documents | Read-only | ✅ |
+| `accountant` | Accounts staff | Assigned leases, rent and payments | Mark payments for assigned leases | ✅ |
+| `advisor` | Investment advisor | Assigned leases and their documents | Read-only | ✅ |
 | `handler` | Day-to-day operator (Tajini, Dharmendra) — *target state* | Estate, leases, payments, maintenance, compliance, reports, tasks, activity, automation | Properties, units, parties, leases, deposits, reminders, maintenance, compliance | ❌ post-MVP |
-| `viewer` | Read-only (Bhanuka, external auditor) — *target state* | Most read endpoints | Nothing | ❌ post-MVP |
+| `viewer` | Default for new sign-ups | No lease or payment access | Nothing | ✅ |
 | `introducer` | Outside party (Stephen) — *target state* | Their leases + their commission accruals | Nothing | ❌ post-MVP |
 
 The full matrix renders at `/admin/access` — every Resource × Role pair. In the MVP this is three columns; the legacy roles are reintroduced as we re-open the deferred surfaces.
 
-### 21.1a Lawyer scoping
+### 21.1a Staff lease scoping
 
-Lawyers in the MVP don't see the whole portfolio. Each lawyer has an `assignedLeaseIds: string[]` on their `AppUser` record; their list pages, lease detail pages, and rent board are filtered to those ids client-side via `src/lib/demo/scope.ts → scopeByLease`. Direct URL hits to an out-of-scope lease render the `<LeaseScopeGate>` "Out of your scope" view. Phase 02 moves this filter into Postgres RLS so out-of-scope rows never leave the server.
+Lawyers, accountants, and advisors see only leases with a matching `lease_party_role.user_id`. The participant row also carries a `party_id` for agreement text and contact details. An external participant has a party row but no user ID, so they receive no app access. `assignedLeaseIds` is derived from the participant rows at sign-in; the old manually maintained array is no longer an authority. Server pages and actions check the assignment before returning data. Browser Data API access to public app tables is disabled by RLS without client policies; the server-only Drizzle connection remains the app's data access path.
 
 ### 21.2 The Resource model
 

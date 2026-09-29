@@ -1,3 +1,4 @@
+import { requireResource } from "@/lib/auth/authorization";
 import Link from "next/link";
 
 import { MoneyDisplay } from "@/components/app/money-display";
@@ -22,6 +23,7 @@ function aging(dueDate: string): { bucket: "0-7" | "8-30" | "31-90" | "90+"; day
 }
 
 export default async function ArrearsPage() {
+  await requireResource("reports:read");
   const backend = getBackend();
   const [ledger, leases, parties] = await Promise.all([
     backend.payments.listLedger({ paid: false }),

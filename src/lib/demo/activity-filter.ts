@@ -20,22 +20,16 @@ export function filterActivities(
     case "account_manager":
       return [...activities];
 
-    case "lawyer": {
+    case "lawyer":
+    case "accountant":
+    case "advisor": {
       // Scoped to their assigned leases. Untargeted activities (no leaseId)
       // are dropped unless they're a system/human note about the lawyer.
       const myLeases = new Set(user.assignedLeaseIds ?? []);
-      return activities.filter((a) => {
-        if (a.workflow === "human" && a.title.includes(user.name)) return true;
-        if (!a.leaseId) return false;
-        return myLeases.has(a.leaseId);
-      });
+      return activities.filter((a) => Boolean(a.leaseId && myLeases.has(a.leaseId)));
     }
 
     default:
-      // Custom role: no opinions yet — show only activities they could
-      // navigate to (i.e. ones with no lease, or their own decisions).
-      return activities.filter(
-        (a) => a.workflow === "human" || a.workflow === "system",
-      );
+      return [];
   }
 }

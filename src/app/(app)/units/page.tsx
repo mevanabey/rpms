@@ -1,3 +1,4 @@
+import { requireResource } from "@/lib/auth/authorization";
 import Link from "next/link";
 
 import { NewUnitButton } from "@/components/app/forms/new-unit-button";
@@ -10,6 +11,7 @@ import { getBackend } from "@/server/container";
 import { DraftUnitsCard } from "./_components/draft-units-card";
 
 export default async function UnitsPage() {
+  await requireResource("units:read");
   const backend = getBackend();
   const [units, properties, leases] = await Promise.all([
     backend.properties.listUnits(),

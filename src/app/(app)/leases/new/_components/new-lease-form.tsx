@@ -80,7 +80,6 @@ import type {
   LeasePurpose,
   Money,
   Party,
-  PartyRole,
   PaymentCadence,
   PaymentMethod,
   Property,
@@ -101,6 +100,8 @@ import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { DraftLeaseDocumentDialog } from "@/components/app/draft-lease-document-dialog";
 import { NewUnitButton } from "@/components/app/forms/new-unit-button";
 import { PartyPicker } from "@/components/app/forms/party-picker";
+import { StaffOrContactSelect } from "@/components/app/forms/staff-or-contact-select";
+import type { StaffUser } from "@/lib/auth/staff";
 import { PropertyPicker } from "@/components/app/forms/property-picker";
 
 // ───────────────────────────────────────────────────── Zod schema
@@ -163,8 +164,11 @@ const schema = z
     lesseeAddress: z.string().optional(),
     tenantPartyId: z.string().optional(),
     advisorPartyId: z.string().optional(),
+    advisorUserId: z.string().optional(),
     lessorLawyerPartyId: z.string().optional(),
+    lessorLawyerUserId: z.string().optional(),
     lesseeLawyerPartyId: z.string().optional(),
+    lesseeLawyerUserId: z.string().optional(),
 
     // Term & notice
     startDate: z.string().min(1, "Required"),
@@ -215,6 +219,7 @@ const schema = z
     // Internal (off-checklist)
     introducerPartyId: z.string().optional(),
     handlerPartyId: z.string().optional(),
+    handlerUserId: z.string().optional(),
   })
   .superRefine((v, ctx) => {
     if (v.hasSubtenancy && !v.sub) {
@@ -278,11 +283,13 @@ export function NewLeaseForm({
   units,
   parties,
   headLeases,
+  staff,
 }: {
   properties: Property[];
   units: Unit[];
   parties: Party[];
   headLeases: Lease[];
+  staff: StaffUser[];
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<{
@@ -333,8 +340,11 @@ export function NewLeaseForm({
       lesseeAddress: "",
       tenantPartyId: "",
       advisorPartyId: "",
+      advisorUserId: "",
       lessorLawyerPartyId: "",
+      lessorLawyerUserId: "",
       lesseeLawyerPartyId: "",
+      lesseeLawyerUserId: "",
       startDate: "",
       endDate: "",
       advanceMonths: undefined,
@@ -383,6 +393,7 @@ export function NewLeaseForm({
       sub: undefined,
       introducerPartyId: "",
       handlerPartyId: "",
+      handlerUserId: "",
     },
     mode: "onTouched",
   });
@@ -875,29 +886,38 @@ export function NewLeaseForm({
         <SectionCard
           icon={Gavel}
           title="Advisors & lawyers"
-          description="All optional. Roll into the lease as additional roles."
+          description="Assign a system user for lease access, or add an external contact for correspondence only."
         >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <OptionalPartySelect
-              control={form.control}
+            <ParticipantSelect
+              form={form}
               name="advisorPartyId"
+              userName="advisorUserId"
+              role="advisor"
               label="Property Investment Advisor"
               parties={parties}
               draftParties={draftParties}
+              staff={staff}
             />
-            <OptionalPartySelect
-              control={form.control}
+            <ParticipantSelect
+              form={form}
               name="lessorLawyerPartyId"
+              userName="lessorLawyerUserId"
+              role="lawyer"
               label="Landlord's Lawyer"
               parties={parties}
               draftParties={draftParties}
+              staff={staff}
             />
-            <OptionalPartySelect
-              control={form.control}
+            <ParticipantSelect
+              form={form}
               name="lesseeLawyerPartyId"
+              userName="lesseeLawyerUserId"
+              role="lawyer"
               label="CTP Lawyer"
               parties={parties}
               draftParties={draftParties}
+              staff={staff}
             />
           </div>
         </SectionCard>
@@ -1375,12 +1395,15 @@ export function NewLeaseForm({
                   parties={parties}
                   draftParties={draftParties}
                 />
-                <OptionalPartySelect
-                  control={form.control}
+                <ParticipantSelect
+                  form={form}
                   name="handlerPartyId"
+                  userName="handlerUserId"
+                  role="accountant"
                   label="Accountant / handler"
                   parties={parties}
                   draftParties={draftParties}
+                  staff={staff}
                 />
               </CardContent>
             </CollapsibleContent>
@@ -1496,7 +1519,7 @@ function toLeaseCreateIntent(
     stampDuty?: Money;
     legalFees?: Money;
     clauses?: LeaseClauses;
-    additionalRoles?: { partyId: string; role: PartyRole }[];
+    additionalRoles?: LeasePartyRole[];
     tranches: Array<{
       sequence: number;
       startDate: string;
@@ -1514,7 +1537,7 @@ function toLeaseCreateIntent(
       ? addYears(i.startDate, i.lockInYears)
       : undefined;
   const additionalRoles: LeasePartyRole[] | undefined = i.additionalRoles?.map(
-    (r) => ({ partyId: r.partyId, role: r.role }),
+    (r) => ({ partyId: r.partyId, role: r.role, userId: r.userId }),
   );
   return {
     propertyId: i.propertyId,
@@ -1619,6 +1642,11 @@ function buildSubIntent(values: FormValues, parentDraftId: string): Record<strin
     endDate: values.endDate,
     paymentCadence: values.sub.cadence,
     defaultPaymentMethod: values.sub.paymentMethod,
+    // The Capital Trust team works both linked tenancies. On the sub-lease
+    // Capital Trust is the lessor, so its lawyer switches sides.
+    additionalRoles: assembleAdditionalRoles(values)
+      ?.filter((item) => ["advisor", "accountant_handler", "lessee_lawyer"].includes(item.role))
+      .map((item) => item.role === "lessee_lawyer" ? { ...item, role: "lessor_lawyer" } : item),
     securityDeposit:
       values.sub.securityDepositAmount && values.sub.securityDepositAmount > 0
         ? {
@@ -1676,20 +1704,20 @@ function assembleClauses(values: FormValues) {
 }
 
 function assembleAdditionalRoles(values: FormValues) {
-  const out: { partyId: string; role: string }[] = [];
-  if (values.advisorPartyId) out.push({ partyId: values.advisorPartyId, role: "advisor" });
+  const out: LeasePartyRole[] = [];
+  if (values.advisorPartyId) out.push({ partyId: values.advisorPartyId, role: "advisor", userId: values.advisorUserId || undefined });
   if (values.lessorLawyerPartyId) {
-    out.push({ partyId: values.lessorLawyerPartyId, role: "lessor_lawyer" });
+    out.push({ partyId: values.lessorLawyerPartyId, role: "lessor_lawyer", userId: values.lessorLawyerUserId || undefined });
   }
   if (values.lesseeLawyerPartyId) {
-    out.push({ partyId: values.lesseeLawyerPartyId, role: "lessee_lawyer" });
+    out.push({ partyId: values.lesseeLawyerPartyId, role: "lessee_lawyer", userId: values.lesseeLawyerUserId || undefined });
   }
   if (values.tenantPartyId) out.push({ partyId: values.tenantPartyId, role: "tenant" });
   if (values.introducerPartyId) {
     out.push({ partyId: values.introducerPartyId, role: "introducer" });
   }
   if (values.handlerPartyId) {
-    out.push({ partyId: values.handlerPartyId, role: "accountant_handler" });
+    out.push({ partyId: values.handlerPartyId, role: "accountant_handler", userId: values.handlerUserId || undefined });
   }
   return out.length > 0 ? out : undefined;
 }
@@ -1786,6 +1814,48 @@ function PartyBlock({
         )}
       />
     </div>
+  );
+}
+
+function ParticipantSelect({
+  form,
+  name,
+  userName,
+  role,
+  label,
+  parties,
+  draftParties,
+  staff,
+}: {
+  form: UseFormReturn<FormValues>;
+  name: "advisorPartyId" | "lessorLawyerPartyId" | "lesseeLawyerPartyId" | "handlerPartyId";
+  userName: "advisorUserId" | "lessorLawyerUserId" | "lesseeLawyerUserId" | "handlerUserId";
+  role: StaffUser["role"];
+  label: string;
+  parties: Party[];
+  draftParties: DraftParty[];
+  staff: StaffUser[];
+}) {
+  return (
+    <FormField control={form.control} name={name} render={({ field }) => (
+      <FormItem>
+        <FormLabel>{label} <span className="font-normal text-muted-foreground text-xs">(optional)</span></FormLabel>
+        <FormControl>
+          <StaffOrContactSelect
+            role={role}
+            value={(field.value as string) ?? ""}
+            userId={form.watch(userName) || undefined}
+            onChange={(partyId, userId) => {
+              form.setValue(name, partyId, { shouldDirty: true });
+              form.setValue(userName, userId ?? "", { shouldDirty: true });
+            }}
+            parties={parties}
+            draftParties={draftParties}
+            staff={staff}
+          />
+        </FormControl>
+      </FormItem>
+    )} />
   );
 }
 

@@ -121,7 +121,7 @@ export function toTranche(row: RentScheduleTrancheRow): RentScheduleTranche {
 }
 
 export function toLeasePartyRole(row: LeasePartyRoleRow): LeasePartyRole {
-  return { partyId: row.partyId, role: row.role };
+  return { partyId: row.partyId, role: row.role, userId: row.userId ?? undefined };
 }
 
 export function toObligation(row: ObligationRow): Obligation {

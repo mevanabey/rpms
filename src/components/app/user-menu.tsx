@@ -21,7 +21,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useDemoStore } from "@/lib/demo/store";
-import { useCurrentUser } from "@/lib/demo/use-store";
+import { useCanCheck, useCurrentUser } from "@/lib/demo/use-store";
 import { createClient } from "@/lib/supabase/client";
 import { getInitials } from "@/lib/utils";
 
@@ -30,6 +30,7 @@ import { RolePill } from "./role-pill";
 export function UserMenu() {
   const { isMobile } = useSidebar();
   const user = useCurrentUser();
+  const can = useCanCheck();
   const logout = useDemoStore((s) => s.logout);
   const clearDemo = useDemoStore((s) => s.clearDemo);
   const router = useRouter();
@@ -94,10 +95,12 @@ export function UserMenu() {
               </div>
             </div>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => router.push("/admin/users")}>
-              <UserCog className="size-3.5" />
-              Manage users
-            </DropdownMenuItem>
+            {can("admin:users") && (
+              <DropdownMenuItem onSelect={() => router.push("/admin/users")}>
+                <UserCog className="size-3.5" />
+                Manage users
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               onSelect={(e) => {
                 e.preventDefault();

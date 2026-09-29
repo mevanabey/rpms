@@ -1,14 +1,18 @@
 import { getBackend } from "@/server/container";
+import { requireResource } from "@/lib/auth/authorization";
+import { getAssignableStaff } from "@/lib/auth/staff";
 
 import { NewLeaseForm } from "./_components/new-lease-form";
 
 export default async function NewLeasePage() {
+  await requireResource("leases:create");
   const backend = getBackend();
-  const [properties, units, parties, leases] = await Promise.all([
+  const [properties, units, parties, leases, staff] = await Promise.all([
     backend.properties.listProperties(),
     backend.properties.listUnits(),
     backend.parties.list(),
     backend.leases.list(),
+    getAssignableStaff(),
   ]);
   const headLeases = leases.filter((l) => l.kind === "head");
 
@@ -27,6 +31,7 @@ export default async function NewLeasePage() {
         units={units}
         parties={parties}
         headLeases={headLeases}
+        staff={staff}
       />
     </div>
   );

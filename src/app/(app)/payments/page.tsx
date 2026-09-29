@@ -3,16 +3,22 @@ import type { Currency } from "@/core/types";
 import { partyMap } from "@/lib/lookup";
 import { formatCurrency } from "@/lib/utils";
 import { getBackend } from "@/server/container";
+import { requireResource } from "@/lib/auth/authorization";
+import { scopeByLease } from "@/lib/demo/scope";
 
 import { PaymentsTable, type PaymentRow } from "./_components/payments-table";
 
 export default async function PaymentsPage() {
+  const user = await requireResource("payments:read");
   const backend = getBackend();
-  const [ledger, leases, parties] = await Promise.all([
+  const [allLedger, allLeases, parties] = await Promise.all([
     backend.payments.listLedger(),
     backend.leases.list(),
     backend.parties.list(),
   ]);
+  const leases = scopeByLease(user, allLeases, (lease) => lease.id);
+  const visibleIds = new Set(leases.map((lease) => lease.id));
+  const ledger = allLedger.filter((entry) => visibleIds.has(entry.leaseId));
 
   const leaseById = new Map(leases.map((l) => [l.id, l]));
   const partyById = partyMap(parties);

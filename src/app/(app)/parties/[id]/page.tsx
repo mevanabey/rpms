@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { propertyMap } from "@/lib/lookup";
 import { formatDate } from "@/lib/utils";
 import { getBackend } from "@/server/container";
+import { requireResource } from "@/lib/auth/authorization";
 
 export default async function PartyDetailPage({
   params,
@@ -19,6 +20,7 @@ export default async function PartyDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  await requireResource("parties:read");
   const backend = getBackend();
   const party = await backend.parties.get(id);
   if (!party) notFound();

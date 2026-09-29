@@ -319,6 +319,7 @@ export const supabaseBackend: Backend = {
             intent.additionalRoles.map((r) => ({
               leaseId: inserted.id,
               partyId: r.partyId,
+              userId: r.userId ?? null,
               role: r.role,
             })),
           );
@@ -448,7 +449,7 @@ export const supabaseBackend: Backend = {
               seen.add(key);
               return true;
             })
-            .map((r) => ({ leaseId: id, partyId: r.partyId, role: r.role }));
+            .map((r) => ({ leaseId: id, partyId: r.partyId, userId: r.userId ?? null, role: r.role }));
           if (values.length > 0) await tx.insert(leasePartyRoleTable).values(values);
         }
       });

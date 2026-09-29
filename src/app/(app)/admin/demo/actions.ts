@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { mockAdmin } from "@/server/adapters/mock";
+import { requireResource } from "@/lib/auth/authorization";
 
 /**
  * Mutates the in-memory mock backend on the server. Both actions revalidate
@@ -27,17 +28,20 @@ async function revalidateBackendRoutes() {
 }
 
 export async function resetMockBackend(): Promise<{ ok: true; counts: Record<string, number> }> {
+  await requireResource("admin:reset-demo");
   mockAdmin.resetAll();
   await revalidateBackendRoutes();
   return { ok: true, counts: mockAdmin.counts() };
 }
 
 export async function clearMockBackend(): Promise<{ ok: true; counts: Record<string, number> }> {
+  await requireResource("admin:reset-demo");
   mockAdmin.clearAll();
   await revalidateBackendRoutes();
   return { ok: true, counts: mockAdmin.counts() };
 }
 
 export async function getMockBackendCounts(): Promise<Record<string, number>> {
+  await requireResource("admin:reset-demo");
   return mockAdmin.counts();
 }

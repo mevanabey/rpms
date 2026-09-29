@@ -107,6 +107,8 @@ export interface RentScheduleTranche {
 export interface LeasePartyRole {
   partyId: string;
   role: PartyRole;
+  /** Supabase Auth user explicitly attached to this lease; absent for contacts. */
+  userId?: string;
 }
 
 /** Which side of the lease is responsible for an operational expense. */

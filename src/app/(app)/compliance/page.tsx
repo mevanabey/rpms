@@ -1,3 +1,4 @@
+import { requireResource } from "@/lib/auth/authorization";
 import Link from "next/link";
 
 import { Calendar, ClipboardList } from "lucide-react";
@@ -60,6 +61,7 @@ function bucket(o: Obligation): "30d" | "90d" | "year" | "later" {
 }
 
 export default async function CompliancePage() {
+  await requireResource("compliance:read");
   const backend = getBackend();
   const [obligations, leases] = await Promise.all([
     backend.payments.listObligations(),

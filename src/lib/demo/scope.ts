@@ -1,10 +1,4 @@
-/**
- * Per-user lease scoping. Phase 01 enforces this on the client; Phase 02
- * moves the same predicate into Postgres RLS so the rows never leave the DB.
- *
- * Currently only `lawyer` is scoped — admins and account managers see
- * everything in the portfolio.
- */
+/** Per-user lease scoping for server access checks and client views. */
 import type { AppUser } from "./identity";
 
 /**
@@ -13,10 +7,10 @@ import type { AppUser } from "./identity";
  */
 export function canSeeLease(user: AppUser | null, leaseId: string): boolean {
   if (!user) return false;
-  if (user.role === "lawyer") {
+  if (user.role === "lawyer" || user.role === "accountant" || user.role === "advisor") {
     return (user.assignedLeaseIds ?? []).includes(leaseId);
   }
-  return true;
+  return user.role === "admin" || user.role === "account_manager";
 }
 
 /** Filter an array of lease-keyed rows down to what `user` may see. */
@@ -26,7 +20,8 @@ export function scopeByLease<T>(
   getLeaseId: (row: T) => string,
 ): T[] {
   if (!user) return [];
-  if (user.role !== "lawyer") return [...rows];
+  if (user.role === "admin" || user.role === "account_manager") return [...rows];
+  if (user.role !== "lawyer" && user.role !== "accountant" && user.role !== "advisor") return [];
   const allowed = new Set(user.assignedLeaseIds ?? []);
   return rows.filter((r) => allowed.has(getLeaseId(r)));
 }

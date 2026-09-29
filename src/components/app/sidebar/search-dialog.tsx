@@ -25,6 +25,8 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useCanCheck } from "@/lib/demo/use-store";
+import type { Resource } from "@/lib/demo/identity";
 import {
   Command,
   CommandDialog,
@@ -56,6 +58,7 @@ const QUICK_NAV: Array<{ value: string; label: string; href: string; icon: Lucid
   { value: "new lease onboarding", label: "New lease", href: "/leases/new", icon: FileSignature },
   { value: "documents files vault", label: "Documents", href: "/documents", icon: Files },
   { value: "payments ledger receipts", label: "Payments", href: "/payments", icon: Receipt },
+  { value: "rent ledger", label: "Rent", href: "/rent", icon: Receipt },
   { value: "reconciliation inbox bank", label: "Reconciliation inbox", href: "/payments/inbox", icon: Inbox },
   { value: "commissions introducers payouts", label: "Commissions", href: "/commissions", icon: Coins },
   { value: "reminders notifications", label: "Reminders", href: "/reminders", icon: Bell },
@@ -71,8 +74,33 @@ const QUICK_NAV: Array<{ value: string; label: string; href: string; icon: Lucid
   { value: "users admin", label: "Users", href: "/admin/users", icon: Settings },
 ];
 
+const NAV_RESOURCE: Record<string, Resource> = {
+  "/properties": "properties:read",
+  "/units": "units:read",
+  "/parties": "parties:read",
+  "/leases": "leases:read",
+  "/leases/new": "leases:create",
+  "/documents": "leases:write",
+  "/payments": "payments:read",
+  "/rent": "payments:read",
+  "/payments/inbox": "payments:reconcile",
+  "/commissions": "commissions:read",
+  "/reminders": "reminders:read",
+  "/maintenance": "maintenance:read",
+  "/compliance": "compliance:read",
+  "/reports/rent-roll": "reports:read",
+  "/reports/arrears": "reports:read",
+  "/reports/escalations": "reports:read",
+  "/reports/cashflow": "reports:read",
+  "/admin/import": "admin:import",
+  "/admin/templates": "admin:templates",
+  "/admin/workflows": "admin:workflows",
+  "/admin/users": "admin:users",
+};
+
 export function SearchDialog() {
   const router = useRouter();
+  const can = useCanCheck();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -81,18 +109,16 @@ export function SearchDialog() {
       if ((e.key === "k" || e.key === "j") && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setOpen((current) => !current);
+        setQuery("");
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  useEffect(() => {
-    if (!open) setQuery("");
-  }, [open]);
-
   const go = (href: string) => {
     setOpen(false);
+    setQuery("");
     router.push(href);
   };
 
@@ -110,13 +136,13 @@ export function SearchDialog() {
         </kbd>
       </Button>
 
-      <CommandDialog open={open} onOpenChange={setOpen} className="max-w-xl">
+      <CommandDialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery(""); }} className="max-w-xl">
         <Command>
           <CommandInput placeholder="Search the dashboard…" value={query} onValueChange={setQuery} />
           <CommandList className="max-h-[480px]">
             <CommandEmpty>No matches.</CommandEmpty>
             <CommandGroup heading="Quick nav">
-              {QUICK_NAV.map((item) => (
+              {QUICK_NAV.filter((item) => !NAV_RESOURCE[item.href] || can(NAV_RESOURCE[item.href])).map((item) => (
                 <CommandItem key={item.href + item.label} value={item.value} onSelect={() => go(item.href)}>
                   <item.icon className="size-4 shrink-0 text-muted-foreground" />
                   <span>{item.label}</span>

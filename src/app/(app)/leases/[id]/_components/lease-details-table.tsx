@@ -331,24 +331,10 @@ export function LeaseDetailsTable({
       ),
     },
     ...EXTRA_ROLES.map(({ role, label }): LeaseDetailRow => {
-      const assigned = roles.find((r) => r.role === role);
-      const party = assigned ? byId.get(assigned.partyId) : undefined;
+      const assigned = roles.filter((r) => r.role === role);
       return {
         label,
-        editOnly: !assigned,
-        value: editable(
-          label,
-          {
-            control: {
-              kind: "select",
-              value: assigned?.partyId ?? null,
-              options: partyOptions,
-              clearable: true,
-            },
-            save: { on: "role", role, currentRoles: roles },
-          },
-          party?.displayName ?? "—",
-        ),
+        value: assigned.map((person) => byId.get(person.partyId)?.displayName ?? "Contact").join(", ") || "—",
       };
     }),
     {
