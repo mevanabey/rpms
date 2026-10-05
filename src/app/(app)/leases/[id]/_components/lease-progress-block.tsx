@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useSubmission } from "@/hooks/use-submission";
+
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -240,11 +242,14 @@ function StagePanel(props: PanelProps & { current: number }) {
 function DraftPanel({ leaseId, onLeaseUpdated }: PanelProps) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [uploading, startUpload] = useTransition();
-  const [generating, startGenerate] = useTransition();
+  const { pending: busy, run } = useSubmission();
+  const [operation, setOperation] = useState<"upload" | "generate">("upload");
+  const uploading = busy && operation === "upload";
+  const generating = busy && operation === "generate";
 
   const onUploadPicked = (file: File) => {
-    startUpload(async () => {
+    void run(async () => {
+      setOperation("upload");
       const fd = new FormData();
       fd.append("file", file);
       const res = await uploadLeaseAgreementAction(leaseId, fd);
@@ -259,7 +264,8 @@ function DraftPanel({ leaseId, onLeaseUpdated }: PanelProps) {
   };
 
   const onGenerate = () => {
-    startGenerate(async () => {
+    void run(async () => {
+      setOperation("generate");
       try {
         const res = await generateLeaseAgreementAction(leaseId);
         if (!res.ok) {
@@ -281,7 +287,6 @@ function DraftPanel({ leaseId, onLeaseUpdated }: PanelProps) {
     });
   };
 
-  const busy = uploading || generating;
 
   return (
     <PanelShell description="Review the figures, then either generate the lease agreement from the template or upload a manually-prepared one.">
@@ -336,7 +341,7 @@ function describeSend(data: SendResult): { description: string } | undefined {
 }
 
 function ViewAgreementButton({ leaseId }: { leaseId: string }) {
-  const [opening, start] = useTransition();
+  const { pending: opening, run: start } = useSubmission();
   const onClick = () => {
     start(async () => {
       const res = await getLeaseAgreementUrlAction(leaseId);
@@ -362,7 +367,7 @@ function SendEmailsPanel({
   onLeaseUpdated,
 }: PanelProps) {
   const router = useRouter();
-  const [busy, start] = useTransition();
+  const { pending: busy, run: start } = useSubmission();
   const lawyerSent = Boolean(lawyerEmailSentAt);
   const advisorSent = Boolean(advisorEmailSentAt);
 
@@ -460,7 +465,7 @@ function SendEmailsPanel({
 
 function AdvisorApprovalPanel({ leaseId, onLeaseUpdated }: PanelProps) {
   const router = useRouter();
-  const [busy, start] = useTransition();
+  const { pending: busy, run: start } = useSubmission();
   const advance = () => {
     start(async () => {
       const res = await sendLeaseEmailAction(leaseId, "accounts");
@@ -488,7 +493,7 @@ function AdvisorApprovalPanel({ leaseId, onLeaseUpdated }: PanelProps) {
 
 function AccountsPanel({ leaseId, onLeaseUpdated }: PanelProps) {
   const router = useRouter();
-  const [busy, start] = useTransition();
+  const { pending: busy, run: start } = useSubmission();
   const activate = () => {
     start(async () => {
       const res = await markLeaseActiveAction(leaseId);
@@ -576,8 +581,8 @@ function ActivePanel({
   })();
 
   const isOverdue = Boolean(adjNextDueDate && adjNextDueDate < today);
-  const [busy, start] = useTransition();
-  const [regenerating, startRegenerate] = useTransition();
+  const { pending: busy, run: start } = useSubmission();
+  const { pending: regenerating, run: startRegenerate } = useSubmission();
   const [paidOpen, setPaidOpen] = useState(false);
 
   const regenerateSchedule = () => {

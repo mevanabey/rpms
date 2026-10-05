@@ -1,11 +1,12 @@
 "use client";
 
+import { useSubmission } from "@/hooks/use-submission";
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  Bot,
   Building2,
   CheckCircle2,
   ChevronDown,
@@ -13,7 +14,6 @@ import {
   ClipboardList,
   FileSignature,
   Gavel,
-  ListChecks,
   Plus,
   Receipt,
   ShieldCheck,
@@ -24,6 +24,7 @@ import {
 import {
   useFieldArray,
   useForm,
+  useWatch,
   type Control,
   type Resolver,
   type UseFormReturn,
@@ -72,7 +73,6 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type {
   AgreementLabel,
-  Currency,
   Lease,
   LeaseClauses,
   LeaseKind,
@@ -291,7 +291,7 @@ export function NewLeaseForm({
   headLeases: Lease[];
   staff: StaffUser[];
 }) {
-  const [submitting, setSubmitting] = useState(false);
+  const { pending: submitting, run } = useSubmission();
   const [outcome, setOutcome] = useState<{
     masterDraftId: string;
     subDraftId?: string;
@@ -399,16 +399,16 @@ export function NewLeaseForm({
   });
 
   // Watch a few fields for conditional UX.
-  const watchedKind = form.watch("kind");
-  const watchedPropertyId = form.watch("propertyId");
-  const watchedLessorId = form.watch("lessorPartyId");
-  const watchedLesseeId = form.watch("lesseePartyId");
-  const watchedAgreementLabel = form.watch("agreementLabel");
-  const watchedDepositRefundTo = form.watch("depositRefundTo");
-  const watchedHasSubtenancy = form.watch("hasSubtenancy");
-  const watchedSubTenantId = form.watch("sub.tenantPartyId");
-  const watchedLockInSpecified = form.watch("lockInSpecified");
-  const watchedStampDutyApplicable = form.watch("stampDutyApplicable");
+  const watchedKind = useWatch({ control: form.control, name: "kind" });
+  const watchedPropertyId = useWatch({ control: form.control, name: "propertyId" });
+  const watchedLessorId = useWatch({ control: form.control, name: "lessorPartyId" });
+  const watchedLesseeId = useWatch({ control: form.control, name: "lesseePartyId" });
+  const watchedAgreementLabel = useWatch({ control: form.control, name: "agreementLabel" });
+  const watchedDepositRefundTo = useWatch({ control: form.control, name: "depositRefundTo" });
+  const watchedHasSubtenancy = useWatch({ control: form.control, name: "hasSubtenancy" });
+  const watchedSubTenantId = useWatch({ control: form.control, name: "sub.tenantPartyId" });
+  const watchedLockInSpecified = useWatch({ control: form.control, name: "lockInSpecified" });
+  const watchedStampDutyApplicable = useWatch({ control: form.control, name: "stampDutyApplicable" });
 
   // Auto-fill lessor / lessee addresses when picking a party that has one.
   useEffect(() => {
@@ -485,9 +485,9 @@ export function NewLeaseForm({
   }, [watchedHasSubtenancy]);
 
   // Helpers for the action-bar summary.
-  const watchedTranches = form.watch("tranches");
+  const watchedTranches = useWatch({ control: form.control, name: "tranches" });
   const watchedKindForSummary = watchedKind;
-  const watchedPurpose = form.watch("purpose");
+  const watchedPurpose = useWatch({ control: form.control, name: "purpose" });
   const summary = [
     watchedKindForSummary === "head" ? "Head lease" : "Sublease",
     watchedPurpose,
@@ -498,8 +498,7 @@ export function NewLeaseForm({
     .join(" · ");
 
   async function onSubmit(values: FormValues) {
-    setSubmitting(true);
-    try {
+    return run(async () => {
       const store = useDemoStore.getState();
 
       // Cache addresses locally so the form pre-fills next time. (The lease
@@ -583,9 +582,7 @@ export function NewLeaseForm({
         draftProperty,
         recipients,
       });
-    } finally {
-      setSubmitting(false);
-    }
+    });
   }
 
   if (outcome)
@@ -602,8 +599,10 @@ export function NewLeaseForm({
     <Form {...form}>
       <form
         onSubmit={form.handleSubmit(onSubmit)}
+        aria-busy={submitting || form.formState.isSubmitting}
         className="flex flex-col gap-4 md:gap-6 pb-24 md:pb-6"
       >
+        <fieldset disabled={submitting || form.formState.isSubmitting} className="contents">
         {/* ───── 1. Agreement basics */}
         <SectionCard
           icon={ClipboardList}
@@ -1416,9 +1415,9 @@ export function NewLeaseForm({
             <p className="text-muted-foreground text-xs">{summary}</p>
             <div className="flex items-center gap-2">
               <Button asChild type="button" variant="ghost" size="sm">
-                <Link href="/leases">Cancel</Link>
+                <Link href="/leases" aria-disabled={submitting} onClick={(event) => { if (submitting) event.preventDefault(); }}>Cancel</Link>
               </Button>
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" disabled={submitting || form.formState.isSubmitting}>
                 {submitting ? "Submitting…" : "Submit"}
               </Button>
             </div>
@@ -1474,6 +1473,7 @@ export function NewLeaseForm({
             </ol>
           </CardContent>
         </Card> */}
+        </fieldset>
       </form>
     </Form>
   );
@@ -1836,6 +1836,7 @@ function ParticipantSelect({
   draftParties: DraftParty[];
   staff: StaffUser[];
 }) {
+  const selectedUserId = useWatch({ control: form.control, name: userName });
   return (
     <FormField control={form.control} name={name} render={({ field }) => (
       <FormItem>
@@ -1844,7 +1845,7 @@ function ParticipantSelect({
           <StaffOrContactSelect
             role={role}
             value={(field.value as string) ?? ""}
-            userId={form.watch(userName) || undefined}
+            userId={selectedUserId || undefined}
             onChange={(partyId, userId) => {
               form.setValue(name, partyId, { shouldDirty: true });
               form.setValue(userName, userId ?? "", { shouldDirty: true });
@@ -2464,31 +2465,6 @@ function SubTenancyBlock({
 }
 
 // ───────────────────────────────────────────────────── Outcome panel
-
-function NextStep({
-  n,
-  icon: Icon,
-  label,
-  detail,
-}: {
-  n: number;
-  icon: typeof Bot;
-  label: string;
-  detail: string;
-}) {
-  return (
-    <li className="flex items-start gap-3 rounded-md border bg-muted/40 px-3 py-2">
-      <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border bg-background text-muted-foreground tabular-nums text-[11px]">
-        {n}
-      </div>
-      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 flex-1">
-        <div className="font-medium text-sm">{label}</div>
-        <div className="text-muted-foreground text-xs">{detail}</div>
-      </div>
-    </li>
-  );
-}
 
 function OutcomePanel({
   outcome,

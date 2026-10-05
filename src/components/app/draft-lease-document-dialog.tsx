@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition, type ReactNode } from "react";
+import { useSubmission } from "@/hooks/use-submission";
+
+import { useMemo, useState, type ReactNode } from "react";
 
 import { Download, FileText } from "lucide-react";
 
@@ -43,7 +45,7 @@ export function DraftLeaseDocumentDialog({
   trigger?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [downloading, startDownload] = useTransition();
+  const { pending: downloading, run: startDownload } = useSubmission();
   const settings = useLeaseDocSettings();
 
   const data: LeaseDocumentData = useMemo(() => {

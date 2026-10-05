@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useSubmission } from "@/hooks/use-submission";
+
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -74,7 +76,7 @@ export default function ChecklistUploadPage() {
   const pushActivity = useDemoStore((s) => s.pushActivity);
 
   const [files, setFiles] = useState<FileRow[]>([]);
-  const [isRunning, startRun] = useTransition();
+  const { pending: isRunning, run: startRun } = useSubmission();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = (incoming: FileList | File[] | null) => {

@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useSubmission } from "@/hooks/use-submission";
+
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -58,7 +60,7 @@ export default function DemoDataPage() {
   const clearDemo = useDemoStore((s) => s.clearDemo);
   const [pending, setPending] = useState<Mode | null>(null);
   const [backendCounts, setBackendCounts] = useState<Record<string, number> | null>(null);
-  const [isApplying, startTransition] = useTransition();
+  const { pending: isApplying, run: startTransition } = useSubmission();
 
   useEffect(() => {
     void getMockBackendCounts().then(setBackendCounts);

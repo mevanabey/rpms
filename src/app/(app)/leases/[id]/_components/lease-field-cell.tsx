@@ -1,5 +1,7 @@
 "use client";
 
+import { useSubmission } from "@/hooks/use-submission";
+
 /**
  * One value cell of the lease details list.
  *
@@ -334,6 +336,7 @@ function LeaseFieldControlView({
 }) {
   const { control, save } = field;
   const router = useRouter();
+  const { run } = useSubmission();
   const server = draftFor(control);
   const [draft, setDraft] = useState<Draft>(server);
   const [status, setStatus] = useState<SaveStatus>("idle");
@@ -372,11 +375,13 @@ function LeaseFieldControlView({
       setError(read.error);
       return;
     }
-    baseline.current = next;
-    setStatus("saving");
-    setError(null);
-    void (async () => {
-      const res = await persist(leaseId, save, read.value);
+    void run(async () => {
+      baseline.current = next;
+      setStatus("saving");
+      setError(null);
+      let res;
+      try { res = await persist(leaseId, save, read.value); }
+      catch (error) { res = { ok: false as const, error: error instanceof Error ? error.message : "Please try again." }; }
       if (!res.ok) {
         baseline.current = draftFor(control);
         setDraft(draftFor(control));
@@ -387,7 +392,7 @@ function LeaseFieldControlView({
       }
       setStatus("saved");
       router.refresh();
-    })();
+    });
   };
 
   const revert = () => {

@@ -15,8 +15,7 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const access = await getAccountAccess();
-  if (access?.row.isActive && access.row.passwordSetupRequired) redirect("/auth/update-password");
-  if (access?.row.isActive) {
+  if (access?.row.isActive && !access.row.passwordSetupRequired) {
     redirect("/");
   }
   const { error } = await searchParams;
@@ -86,7 +85,7 @@ export default async function LoginPage({
               </h1>
               <p className="mt-2 text-muted-foreground text-sm">
                 Access is limited to accounts created by your administrator.
-                First time here? Use Set your password below.
+                Enter your email to sign in or set your first password.
               </p>
             </div>
 
@@ -96,7 +95,8 @@ export default async function LoginPage({
               </div>
             )}
 
-            <AuthCard />
+            <AuthCard initialEmail={access?.row.isActive ? access.authUser.email : undefined}
+              initialStep={access?.row.isActive ? "new-password" : "email"} />
 
             <p className="mt-6 text-muted-foreground text-xs">
               Trouble signing in? Ask your administrator to confirm your role

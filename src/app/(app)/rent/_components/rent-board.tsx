@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useSubmission } from "@/hooks/use-submission";
 
 import {
   CalendarDays,
@@ -277,7 +278,10 @@ export function RentBoard({
   const user = useCurrentUser();
   const rentReminders = useRentReminders();
   const sendRentReminder = useDemoStore((s) => s.sendRentReminder);
-  const [, startTransition] = useTransition();
+  const { pending: submitting, run } = useSubmission();
+  const [refreshing, startRefresh] = useTransition();
+  const pending = submitting || refreshing;
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const scoped = useMemo(
     () => scopeByLease(user, rows, (r) => r.entry.leaseId),
@@ -412,11 +416,9 @@ export function RentBoard({
     (filters.reminded !== "any" ? 1 : 0);
 
   // Actions -------------------------------------------------------------
-  const handleMarkPaid = (row: RentRow) => {
-    if (!user) return;
+  const savePaid = async (row: RentRow): Promise<boolean> => {
     const method =
       row.entry.amount.currency === "USD" ? "usd_transfer" : "lkr_transfer";
-    startTransition(async () => {
       const result = await markRentPaidAction(row.entry.id, {
         paidDate: TODAY,
         paymentMethod: method,
@@ -424,7 +426,7 @@ export function RentBoard({
       });
       if (!result.ok) {
         toast.error("Could not mark paid", { description: result.error });
-        return;
+        return false;
       }
       toast.success("Rent marked as paid", {
         description: `${row.tenant?.displayName ?? row.entry.leaseId} · ${formatCurrency(
@@ -432,12 +434,21 @@ export function RentBoard({
           { currency: row.entry.amount.currency, noDecimals: true },
         )}`,
       });
-      router.refresh();
+      return true;
+  };
+
+  const handleMarkPaid = (row: RentRow) => {
+    if (!user || pending) return;
+    void run(async () => {
+      setBusyId(row.entry.id);
+      if (await savePaid(row)) startRefresh(() => router.refresh());
     });
   };
 
   const handleUnmarkPaid = (row: RentRow) => {
-    startTransition(async () => {
+    if (pending) return;
+    void run(async () => {
+      setBusyId(row.entry.id);
       const result = await unmarkRentPaidAction(row.entry.id);
       if (!result.ok) {
         toast.error("Could not undo", { description: result.error });
@@ -446,7 +457,7 @@ export function RentBoard({
       toast.success("Undid mark-paid", {
         description: `${row.tenant?.displayName ?? row.entry.leaseId}`,
       });
-      router.refresh();
+      startRefresh(() => router.refresh());
     });
   };
 
@@ -496,9 +507,18 @@ export function RentBoard({
       });
       return;
     }
-    for (const { row } of targets) handleMarkPaid(row);
-    toast.success(`Marked ${targets.length} rent line${targets.length === 1 ? "" : "s"} paid`);
-    clearSelection();
+    if (pending) return;
+    void run(async () => {
+      setBusyId("bulk");
+      let completed = 0;
+      const remaining = new Set(selected);
+      for (const { row } of targets) {
+        if (await savePaid(row)) { completed += 1; remaining.delete(row.entry.id); }
+      }
+      if (completed) toast.success(`Recorded ${completed} rent payment${completed === 1 ? "" : "s"}`);
+      setSelected(remaining);
+      startRefresh(() => router.refresh());
+    });
   };
 
   const handleBulkSendReminder = () => {
@@ -745,8 +765,8 @@ export function RentBoard({
             <Button size="sm" variant="outline" onClick={handleBulkSendReminder}>
               <Send className="size-3.5" /> Send reminder
             </Button>
-            <Button size="sm" variant="outline" onClick={handleBulkMarkPaid}>
-              <CheckCircle2 className="size-3.5" /> Mark paid
+            <Button size="sm" variant="outline" onClick={handleBulkMarkPaid} disabled={pending} aria-busy={pending && busyId === "bulk"}>
+              <CheckCircle2 className="size-3.5" /> {pending && busyId === "bulk" ? "Recording payments…" : "Mark paid"}
             </Button>
             <Button size="sm" variant="outline" onClick={handleBulkExport}>
               <ExternalLink className="size-3.5" /> Export CSV
@@ -874,14 +894,14 @@ export function RentBoard({
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => handleUnmarkPaid(row)}
-                                disabled={!row.entry.paidDate}
+                                disabled={pending || !row.entry.paidDate}
                                 title="Undo mark-paid"
                               >
-                                <Receipt className="size-3.5" /> Undo
+                                <Receipt className="size-3.5" /> {pending && busyId === row.entry.id ? "Saving…" : "Undo"}
                               </Button>
                             ) : (
-                              <Button size="sm" onClick={() => handleMarkPaid(row)}>
-                                <CheckCircle2 className="size-3.5" /> Mark paid
+                              <Button size="sm" onClick={() => handleMarkPaid(row)} disabled={pending} aria-busy={pending && busyId === row.entry.id}>
+                                <CheckCircle2 className="size-3.5" /> {pending && busyId === row.entry.id ? "Recording…" : "Mark paid"}
                               </Button>
                             )}
                           </div>

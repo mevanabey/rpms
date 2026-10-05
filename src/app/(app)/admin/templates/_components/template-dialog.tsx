@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useSubmission } from "@/hooks/use-submission";
 
 import { Eye, FileText, Mail, Pencil, RotateCcw, Save, X } from "lucide-react";
 import { toast } from "sonner";
@@ -42,6 +43,7 @@ export function TemplateDialog({
   open: openProp,
   onOpenChange,
 }: Props) {
+  const { pending, run } = useSubmission();
   const overrides = useTemplateOverrides();
   const setTemplateOverride = useDemoStore((s) => s.setTemplateOverride);
   const resetTemplate = useDemoStore((s) => s.resetTemplate);
@@ -86,6 +88,7 @@ export function TemplateDialog({
     (template.defaultSubject !== undefined && draftSubject !== effectiveSubject);
 
   function onSave() {
+    void run(() => {
     setTemplateOverride(
       template.id,
       {
@@ -103,13 +106,16 @@ export function TemplateDialog({
       description: "Changes apply to all future renders. Reset to revert.",
     });
     setTab("view");
+    });
   }
 
   function onReset() {
+    void run(() => {
     resetTemplate(template.id);
     setDraftBody(template.defaultBody);
     setDraftSubject(template.defaultSubject ?? "");
     toast.success("Template reset to default");
+    });
   }
 
   const HeaderIcon = template.group === "lease" ? FileText : Mail;
@@ -176,8 +182,8 @@ export function TemplateDialog({
                 <Button
                   variant="outline"
                   size="sm"
+                  disabled={pending || !isCustomized}
                   onClick={onReset}
-                  disabled={!isCustomized}
                   className="flex-1 sm:flex-none"
                 >
                   <RotateCcw className="size-3.5" /> Reset
@@ -185,8 +191,8 @@ export function TemplateDialog({
                 <Button
                   variant="default"
                   size="sm"
+                  disabled={pending || !dirty}
                   onClick={onSave}
-                  disabled={!dirty}
                   className="flex-1 sm:flex-none"
                 >
                   <Save className="size-3.5" /> Save changes

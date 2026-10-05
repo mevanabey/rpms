@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSubmission } from "@/hooks/use-submission";
 
 import {
   Check,
@@ -43,6 +44,9 @@ export function LeaseDetailActions({
   parties: Party[];
 }) {
   const router = useRouter();
+  const { pending: uploading, run: upload } = useSubmission();
+  const { pending: exporting, run: exportFile } = useSubmission();
+  const { pending: opening, run: openFile } = useSubmission();
   const editing = useLeaseEditing(lease.id);
   const setEditing = useLeaseEditStore((s) => s.setEditing);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -81,44 +85,40 @@ export function LeaseDetailActions({
   const onFilePicked = (file: File) => {
     const fd = new FormData();
     fd.append("file", file);
-    const toastId = toast.loading("Uploading signed lease…");
-    void (async () => {
+    void upload(async () => {
       const res = await uploadSignedLeaseAction(lease.id, fd);
       if (!res.ok) {
-        toast.error("Upload failed", { id: toastId, description: res.error });
+        toast.error("Upload failed", { description: res.error });
         return;
       }
       // Flip the button right away — refresh just keeps the rest of the
       // page in sync.
       setSignedOverride(true);
       toast.success("Signed lease uploaded", {
-        id: toastId,
         description: "The lease is now active.",
       });
       router.refresh();
-    })();
+    });
   };
 
   const exportChecklist = () => {
-    const toastId = toast.loading("Building checklist…");
-    void (async () => {
+    void exportFile(async () => {
       const res = await exportLeaseChecklistAction(lease.id);
       if (!res.ok) {
         toast.error("Could not export checklist", {
-          id: toastId,
           description: res.error,
         });
         return;
       }
       downloadBase64File(res.data.base64, res.data.fileName, XLSX_MIME_TYPE);
       toast.success("Checklist exported", {
-        id: toastId,
         description: res.data.fileName,
       });
-    })();
+    });
   };
 
   const openSignedLease = () => {
+    void openFile(async () => {
     // Open a blank window inside the click handler so the browser doesn't
     // block the popup; redirect it once the signed URL is back from the
     // server. Avoids the previous useTransition that made the button stick
@@ -130,7 +130,6 @@ export function LeaseDetailActions({
       });
       return;
     }
-    void (async () => {
       const res = await getSignedLeaseUrlAction(lease.id);
       if (!res.ok) {
         win.close();
@@ -138,7 +137,7 @@ export function LeaseDetailActions({
         return;
       }
       win.location.href = res.data.url;
-    })();
+    });
   };
 
   return (
@@ -177,18 +176,19 @@ export function LeaseDetailActions({
       </Button>
       {showSignedControl &&
         (hasSigned ? (
-          <Button variant="outline" size="sm" onClick={openSignedLease}>
+          <Button variant="outline" size="sm" onClick={openSignedLease} disabled={opening}>
             <FileSignature className="size-3.5" />
-            View signed lease
+            {opening ? "Opening…" : "View signed lease"}
           </Button>
         ) : (
           <Button
             variant="outline"
             size="sm"
+            disabled={uploading}
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload className="size-3.5" />
-            Upload signed lease
+            {uploading ? "Uploading…" : "Upload signed lease"}
           </Button>
         ))}
       <input
@@ -227,8 +227,8 @@ export function LeaseDetailActions({
           </>
         )}
       </Button>
-      <Button variant="outline" size="sm" onClick={exportChecklist}>
-        <FileSpreadsheet className="size-3.5" /> Export checklist
+      <Button variant="outline" size="sm" onClick={exportChecklist} disabled={exporting}>
+        <FileSpreadsheet className="size-3.5" /> {exporting ? "Exporting…" : "Export checklist"}
       </Button>
       <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
         <Trash2 className="size-3.5" /> Delete

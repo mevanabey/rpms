@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSubmission } from "@/hooks/use-submission";
 import { toast } from "sonner";
 
 import type { Lease, LeasePartyRole, Party, PartyRole } from "@/core/types";
@@ -26,7 +27,7 @@ export function LeaseParticipants({ lease, parties, staff, canEdit }: {
 }) {
   const router = useRouter();
   const [roles, setRoles] = useState<LeasePartyRole[]>(lease.additionalRoles ?? []);
-  const [saving, setSaving] = useState(false);
+  const { pending: saving, run } = useSubmission();
   const byParty = new Map(parties.map((party) => [party.id, party]));
   const byUser = new Map(staff.map((user) => [user.id, user]));
 
@@ -39,9 +40,8 @@ export function LeaseParticipants({ lease, parties, staff, canEdit }: {
       }
       next.push({ partyId, role, userId });
     }
-    setSaving(true);
+    return run(async () => {
     const result = await updateLeaseAction(lease.id, { additionalRoles: next });
-    setSaving(false);
     if (!result.ok) {
       toast.error("Could not update participant", { description: result.error });
       return;
@@ -49,6 +49,7 @@ export function LeaseParticipants({ lease, parties, staff, canEdit }: {
     setRoles(result.data.additionalRoles ?? []);
     toast.success("Lease participants updated");
     router.refresh();
+    });
   }
 
   return (

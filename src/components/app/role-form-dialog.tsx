@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSubmission } from "@/hooks/use-submission";
+
+import { useState } from "react";
 
 import { Plus, ShieldPlus } from "lucide-react";
 import { toast } from "sonner";
@@ -20,7 +22,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   ROLE_TONE_PRESETS,
   type Resource,
-  type Role,
   type RoleDefinition,
   RESOURCE_GROUPS,
   DEFAULT_PERMISSIONS,
@@ -45,16 +46,22 @@ function slugify(input: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
-export function RoleFormDialog({ editing, trigger, open, onOpenChange }: Props) {
+export function RoleFormDialog(props: Props) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = props.open ?? internalOpen;
+  return <RoleFormSession key={`${props.editing?.id ?? "new"}:${open}`} {...props} open={open} onOpenChange={props.onOpenChange ?? setInternalOpen} />;
+}
+
+function RoleFormSession({ editing, trigger, open, onOpenChange }: Props & { open: boolean; onOpenChange: (open: boolean) => void }) {
   const isEdit = !!editing;
   const addRoleDef = useDemoStore((s) => s.addRoleDef);
   const updateRoleDef = useDemoStore((s) => s.updateRoleDef);
   const setPermission = useDemoStore((s) => s.setPermission);
   const permissions = usePermissions();
 
-  const [internalOpen, setInternalOpen] = useState(false);
-  const realOpen = open ?? internalOpen;
-  const setOpen = onOpenChange ?? setInternalOpen;
+  const { pending, run } = useSubmission();
+  const realOpen = open;
+  const setOpen = onOpenChange;
 
   const [label, setLabel] = useState(editing?.label ?? "");
   const [description, setDescription] = useState(editing?.description ?? "");
@@ -68,20 +75,6 @@ export function RoleFormDialog({ editing, trigger, open, onOpenChange }: Props) 
       ),
   );
 
-  // Re-seed when editing target changes or when reopened.
-  useEffect(() => {
-    if (realOpen) {
-      setLabel(editing?.label ?? "");
-      setDescription(editing?.description ?? "");
-      setTone(editing?.tone ?? ROLE_TONE_PRESETS[5].cls);
-      setPerms(
-        new Set(
-          editing ? permissions[editing.id] ?? [] : DEFAULT_PERMISSIONS.viewer,
-        ),
-      );
-    }
-  }, [realOpen, editing, permissions]);
-
   const togglePerm = (r: Resource) => {
     setPerms((prev) => {
       const next = new Set(prev);
@@ -93,6 +86,7 @@ export function RoleFormDialog({ editing, trigger, open, onOpenChange }: Props) 
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    void run(() => {
     if (!label.trim()) {
       toast.error("Role label is required");
       return;
@@ -128,6 +122,7 @@ export function RoleFormDialog({ editing, trigger, open, onOpenChange }: Props) 
       toast.success(`Role "${label.trim()}" created`);
     }
     setOpen(false);
+    });
   };
 
   const TriggerEl = trigger ?? (
@@ -138,7 +133,7 @@ export function RoleFormDialog({ editing, trigger, open, onOpenChange }: Props) 
   );
 
   return (
-    <Dialog open={realOpen} onOpenChange={setOpen}>
+    <Dialog open={realOpen} onOpenChange={(next) => { if (!pending) setOpen(next); }}>
       <DialogTrigger asChild>{TriggerEl}</DialogTrigger>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
@@ -152,7 +147,8 @@ export function RoleFormDialog({ editing, trigger, open, onOpenChange }: Props) 
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
+        <form onSubmit={onSubmit} aria-busy={pending} className="flex flex-col gap-4">
+          <fieldset disabled={pending} className="contents">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="font-medium text-sm" htmlFor="role-label">
@@ -250,11 +246,12 @@ export function RoleFormDialog({ editing, trigger, open, onOpenChange }: Props) 
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            <Button type="button" disabled={pending} variant="outline" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit">{isEdit ? "Save changes" : "Create role"}</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Saving…" : isEdit ? "Save changes" : "Create role"}</Button>
           </DialogFooter>
+          </fieldset>
         </form>
       </DialogContent>
     </Dialog>

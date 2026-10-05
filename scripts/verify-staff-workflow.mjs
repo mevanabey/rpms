@@ -57,9 +57,35 @@ async function lease(user, property, lessor, lessee, additionalRoles=[]) {
   const result=await good(user,'createLeaseAction',[{propertyId:property.id,unitIds:[],lessorPartyId:lessor.id,lesseePartyId:lessee.id,kind:'head',purpose:'commercial',paymentCadence:'monthly',defaultPaymentMethod:'lkr_transfer',startDate:'2026-10-01',endDate:'2026-12-31',additionalRoles,tranches:[{sequence:1,startDate:'2026-10-01',endDate:'2026-12-31',monthlyRent:{amount:25000,currency:'LKR'},dueDayOfMonth:1}]}]);leaseIds.push(result.id);return result;
 }
 try {
-  const publicLogin=await page(null,'/login');check('Public login offers setup/reset and no signup', publicLogin.response.status===200 && publicLogin.body.includes('Set your password') && publicLogin.body.includes('Forgot password?') && !publicLogin.body.includes('Create account'));
+  const publicLogin=await page(null,'/login');check('Public login starts with email only and no signup', publicLogin.response.status===200 && publicLogin.body.includes('id="auth-email"') && publicLogin.body.includes('Continue') && !publicLogin.body.includes('id="auth-password"') && !publicLogin.body.includes('Create account'));
   const anonymous=await page(null,'/leases');check('Anonymous lease access is denied',anonymous.response.status===307);
   const owner=await account('admin');const advisor=await account('advisor');const accountant=await account('accountant');const lawyer=await account('lawyer');const outsider=await account('advisor');const manager=await account('account_manager');const dual=await account('lawyer',['lawyer','advisor']);
+  const publicCaller={jar:new Map()};
+  const nextStep=await action(publicCaller,'beginSignInAction',['  '+owner.email.toUpperCase()+'  '],'/login');check('Existing password account advances to password and normalizes email',nextStep.ok&&nextStep.step==='password'&&nextStep.email===owner.email);
+  const invalidEmail=await action(publicCaller,'beginSignInAction',['invalid-email'],'/login');check('Email step validates input',!invalidEmail.ok);
+  const missingEmail=await action(publicCaller,'requestPasswordCodeAction',[tag+'-missing@example.invalid'],'/login');check('OTP requests cannot provision unapproved accounts',!missingEmail.ok);
+  const otpSetup=await account('advisor',['advisor'],true);
+  const otpClient=createServerClient(env.NEXT_PUBLIC_SUPABASE_URL,env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,{cookies:{getAll:()=>[...otpSetup.jar].map(([name,value])=>({name,value})),setAll:values=>values.forEach(({name,value})=>otpSetup.jar.set(name,value))}});
+  const otpLink=await admin.auth.admin.generateLink({type:'recovery',email:otpSetup.email});if(otpLink.error)throw otpLink.error;
+  const otp=otpLink.data.properties.email_otp;check('Supabase recovery provides a six-digit email code',/^\d{6}$/.test(otp));
+  const setupStep=await action(publicCaller,'beginSignInAction',[otpSetup.email],'/login');check('First-time email advances directly to OTP',setupStep.ok&&setupStep.step==='code');
+  const [beforeResend]=await sql`select recovery_sent_at from auth.users where id=${otpSetup.id}`;
+  await good(publicCaller,'requestPasswordCodeAction',[otpSetup.email],'/login');
+  const [afterResend]=await sql`select recovery_sent_at from auth.users where id=${otpSetup.id}`;check('Repeated code requests within a minute reuse the pending code',String(beforeResend.recovery_sent_at)===String(afterResend.recovery_sent_at));
+  const wrongOtp=await otpClient.auth.verifyOtp({email:otpSetup.email,token:otp==='000000'?'111111':'000000',type:'recovery'});check('Incorrect email code is rejected',Boolean(wrongOtp.error));
+  await sql`update auth.users set recovery_sent_at=now()-interval '55 minutes' where id=${otpSetup.id}`;
+  const verifiedOtp=await otpClient.auth.verifyOtp({email:otpSetup.email,token:otp,type:'recovery'});check('Email code remains valid after a 55-minute delivery delay',!verifiedOtp.error);
+  const inlineSetup=await page(otpSetup,'/login');check('Verified first-time account gets password setup on the login screen',inlineSetup.response.status===200&&!inlineSetup.error&&inlineSetup.body.includes('Set your first password')&&inlineSetup.body.includes('id="new-password"'));
+  const otpPassword=randomBytes(24).toString('base64url')+'Aa1!';await good(otpSetup,'setPasswordAction',[otpPassword,otpPassword],'/login');
+  const [otpFlag]=await sql`select password_setup_required from user_role where user_id=${otpSetup.id}`;check('OTP password setup clears first-login requirement',otpFlag.password_setup_required===false);
+  const replayOtp=await otpClient.auth.verifyOtp({email:otpSetup.email,token:otp,type:'recovery'});check('Email code is single-use',Boolean(replayOtp.error));
+  const expiredSetup=await account('advisor',['advisor'],true);
+  const expiredLink=await admin.auth.admin.generateLink({type:'recovery',email:expiredSetup.email});if(expiredLink.error)throw expiredLink.error;
+  await sql`update auth.users set recovery_sent_at=now()-interval '61 minutes' where id=${expiredSetup.id}`;
+  const expiredClient=createClient(env.NEXT_PUBLIC_SUPABASE_URL,env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+  const expired=await expiredClient.auth.verifyOtp({email:expiredSetup.email,token:expiredLink.data.properties.email_otp,type:'recovery'});check('Email code expires after the configured one hour',Boolean(expired.error));
+  const inactive=await account('advisor');await sql`update user_role set is_active=false where user_id=${inactive.id}`;
+  const inactiveStep=await action(publicCaller,'beginSignInAction',[inactive.email],'/login');check('Inactive account is denied at email step',!inactiveStep.ok);
   for (const user of [advisor,accountant,lawyer,dual]) {
     const [contact]=await sql`insert into party(kind,display_name,emails)values('individual',${`QA staff ${tag} ${user.role}`},${sql.array([user.email],1009)}::text[])returning id`;
     partyIds.push(contact.id);await sql`update user_role set party_id=${contact.id} where user_id=${user.id}`;user.partyId=contact.id;

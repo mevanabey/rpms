@@ -19,15 +19,18 @@ Copy `.env.example` → `.env.local` (already done if you cloned with a populate
 
 Use email/password authentication for the provisioned staff accounts. Keep **Allow new users to sign up** disabled. Creating an Auth account alone does not grant RPMS access: it also needs an active `public.user_role` row. The app does not auto-provision unknown accounts.
 
-For a new staff account, create it through the Auth Admin API without a password (`email_confirm: true`), then insert an active `user_role` with `password_setup_required=true`, a primary `role`, and its full `roles` array. Staff select **Set your password** on `/login`; Supabase emails a single-use recovery link. After the verified link, `/auth/update-password` saves their chosen password and clears the setup gate. Existing users can select **Forgot password?**. Do not distribute shared or temporary passwords.
+For a new staff account, create it through the Auth Admin API without a password (`email_confirm: true`), then insert an active `user_role` with `password_setup_required=true`, a primary `role`, and its full `roles` array. `/login` starts with email only. The server checks the provisioned account: existing password users enter their password; first-time users automatically receive a six-digit email OTP. After verification, they choose their password on the same screen. **Forgot password?** uses the same OTP and password steps. Unknown and inactive accounts receive no app access or OTP. Do not distribute shared or temporary passwords.
 
-Configure custom SMTP and the invite/recovery email templates to use:
+Configure custom SMTP and the recovery email template to include:
 
 ```html
-<a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=recovery">Set password</a>
+<p>Your RPMS verification code: <strong>{{ .Token }}</strong></p>
+<p>Enter this code on the RPMS login screen. It is valid for one hour.</p>
 ```
 
-Use `type=invite` for invitations. The callback verifies the token server-side and directs users to the password form. The deployed project uses the live RPMS origin as its Site URL; email links therefore lead to the live application. The email rate limit should accommodate staff onboarding (currently 60/hour). Passwords require at least 8 characters including uppercase, lowercase, number, and symbol.
+Use `resetPasswordForEmail` to request the code, and `verifyOtp({email, token, type: "recovery"})` to verify it. Recovery works while public signup remains disabled. Keep `mailer_otp_exp=3600` (one hour), `mailer_otp_length=6`, and the resend interval at 60 seconds. The email rate limit currently allows 60/hour. Delivery may take a few minutes; users stay on the code screen and use the most recent email. Previously issued `/auth/confirm` links remain supported, and `/auth/update-password` remains available for those callbacks. Passwords require at least 8 characters including uppercase, lowercase, number, and symbol.
+
+Forms use `useSubmission` to lock before React renders, await the full mutation, unlock on failure, and retain the pending state through authentication navigation. React Hook Form submissions also remain disabled during validation. Payment dialogs close only after confirmed success; rent tables await bulk writes and keep controls disabled through their refresh.
 
 In Dashboard → Authentication → URL Configuration:
 - **Site URL**: `http://localhost:3000` for dev (and the deployed URL for prod).

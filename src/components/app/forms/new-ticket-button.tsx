@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useSubmission } from "@/hooks/use-submission";
 
 import { Plus } from "lucide-react";
-import { useForm, type Resolver } from "react-hook-form";
+import { useForm, useWatch, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -70,6 +71,7 @@ export function NewTicketButton({
   units: Unit[];
 }) {
   const [open, setOpen] = useState(false);
+  const { pending, run } = useSubmission();
 
   const form = useForm<Values>({
     resolver: zodResolver(schema) as unknown as Resolver<Values>,
@@ -85,10 +87,11 @@ export function NewTicketButton({
     },
   });
 
-  const propertyId = form.watch("propertyId");
+  const propertyId = useWatch({ control: form.control, name: "propertyId" });
   const propertyUnits = units.filter((u) => u.propertyId === propertyId);
 
   function onSubmit(values: Values) {
+    return run(() => {
     const store = useDemoStore.getState();
     const ticket = store.addTicket({
       propertyId: values.propertyId,
@@ -121,10 +124,11 @@ export function NewTicketButton({
     });
     form.reset();
     setOpen(false);
+    });
   }
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={(next) => { if (!pending) setOpen(next); }}>
       <SheetTrigger asChild>
         <Button size="sm">
           <Plus className="size-4" /> New ticket
@@ -140,8 +144,10 @@ export function NewTicketButton({
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(onSubmit)}
+            aria-busy={pending || form.formState.isSubmitting}
             className="flex flex-col gap-4 px-4 pb-4"
           >
+            <fieldset disabled={pending || form.formState.isSubmitting} className="contents">
             <FormField
               control={form.control}
               name="propertyId"
@@ -324,11 +330,12 @@ export function NewTicketButton({
               />
             </div>
             <SheetFooter className="px-0 pt-4">
-              <Button type="submit">Open ticket</Button>
+              <Button type="submit" disabled={pending || form.formState.isSubmitting}>{pending ? "Opening ticket…" : "Open ticket"}</Button>
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
             </SheetFooter>
+            </fieldset>
           </form>
         </Form>
       </SheetContent>

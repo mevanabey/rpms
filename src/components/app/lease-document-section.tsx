@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useSubmission } from "@/hooks/use-submission";
+
+import { useMemo, useState } from "react";
 
 import { ChevronDown, Download, FileCheck2, Send } from "lucide-react";
 import { toast } from "sonner";
@@ -81,7 +83,7 @@ export function LeaseDocumentSection({
 
   const [signerId, setSignerId] = useState<string>(signers[0]?.id ?? "");
   const activeSig = signatures[signerId];
-  const [downloading, startDownload] = useTransition();
+  const { pending: downloading, run: startDownload } = useSubmission();
 
   const handleDownload = () => {
     startDownload(async () => {

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSubmission } from "@/hooks/use-submission";
 
 import { CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
@@ -67,6 +68,7 @@ function MarkRentPaidDialogBody({
   onOpenChange,
 }: Props) {
   const router = useRouter();
+  const { pending, run } = useSubmission();
   const addOptimistic = useLeasePaymentsStore((s) => s.add);
   const today = new Date().toISOString().slice(0, 10);
 
@@ -97,17 +99,10 @@ function MarkRentPaidDialogBody({
       notes: notes.trim() || undefined,
       amount: { amount: parsedAmount, currency: defaultCurrency },
     };
-    // Close the dialog immediately and run the action in the background.
-    // Server-side revalidatePath + router.refresh on dev can take several
-    // seconds, which used to leave the dialog button stuck on "Saving…".
-    // Decoupling means the user gets toast feedback while continuing work.
-    onOpenChange(false);
-    const toastId = toast.loading("Recording payment…");
-    void (async () => {
+    void run(async () => {
       const res = await markNextRentPaidAction(leaseId, payload);
       if (!res.ok) {
         toast.error("Could not mark rent paid", {
-          id: toastId,
           description: res.error,
         });
         return;
@@ -115,13 +110,14 @@ function MarkRentPaidDialogBody({
       // Surface the new entry locally so the Active panel stats + the
       // Recent ledger table reflect it before router.refresh propagates.
       addOptimistic(leaseId, res.data);
-      toast.success("Rent marked as paid", { id: toastId });
+      toast.success("Rent marked as paid");
+      onOpenChange(false);
       router.refresh();
-    })();
+    });
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => { if (!pending) onOpenChange(next); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Mark rent as paid</DialogTitle>
@@ -130,7 +126,7 @@ function MarkRentPaidDialogBody({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4">
+        <fieldset disabled={pending} className="flex flex-col gap-4" aria-busy={pending}>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="amount">Amount received</Label>
             <div className="flex items-center gap-2">
@@ -204,15 +200,15 @@ function MarkRentPaidDialogBody({
               rows={3}
             />
           </div>
-        </div>
+        </fieldset>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" disabled={pending} onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={onSubmit}>
+          <Button onClick={onSubmit} disabled={pending}>
             <CheckCircle2 className="size-3.5" />
-            Mark as paid
+            {pending ? "Recording payment…" : "Mark as paid"}
           </Button>
         </DialogFooter>
       </DialogContent>

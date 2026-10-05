@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { useSubmission } from "@/hooks/use-submission";
 
 import { Plus } from "lucide-react";
-import { useForm, type Resolver } from "react-hook-form";
+import { useForm, useWatch, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -76,7 +77,7 @@ export function NewPartyButton({
   defaultKind?: "individual" | "company";
 } = {}) {
   const [internalOpen, setInternalOpen] = useState(false);
-  const [pending, startTransition] = useTransition();
+  const { pending, run } = useSubmission();
   const router = useRouter();
   const isControlled = openProp !== undefined;
   const open = isControlled ? openProp! : internalOpen;
@@ -98,10 +99,10 @@ export function NewPartyButton({
     },
   });
 
-  const kind = form.watch("kind");
+  const kind = useWatch({ control: form.control, name: "kind" });
 
   function onSubmit(values: Values) {
-    startTransition(async () => {
+    return run(async () => {
       const result = await createPartyAction({
         kind: values.kind,
         displayName: values.displayName,
@@ -136,7 +137,7 @@ export function NewPartyButton({
   }
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={(next) => { if (!pending) setOpen(next); }}>
       {!hideTrigger && (
         <SheetTrigger asChild>
           {trigger ?? (
@@ -157,8 +158,10 @@ export function NewPartyButton({
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(onSubmit)}
+            aria-busy={pending || form.formState.isSubmitting}
             className="flex flex-col gap-4 px-4 pb-4"
           >
+            <fieldset disabled={pending || form.formState.isSubmitting} className="contents">
             <FormField
               control={form.control}
               name="kind"
@@ -288,7 +291,7 @@ export function NewPartyButton({
               )}
             />
             <SheetFooter className="px-0 pt-4">
-              <Button type="submit" disabled={pending}>
+              <Button type="submit" disabled={pending || form.formState.isSubmitting}>
                 {pending ? "Adding…" : "Add party"}
               </Button>
               <Button
@@ -300,6 +303,7 @@ export function NewPartyButton({
                 Cancel
               </Button>
             </SheetFooter>
+            </fieldset>
           </form>
         </Form>
       </SheetContent>

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSubmission } from "@/hooks/use-submission";
 import { toast } from "sonner";
 
 import type { Party } from "@/core/types";
@@ -36,16 +37,15 @@ export function StaffOrContactSelect({
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<"staff" | "contact">(userId ? "staff" : "contact");
-  const [pending, setPending] = useState(false);
+  const { pending: pending, run } = useSubmission();
   const [createdParty, setCreatedParty] = useState<Party | null>(null);
   const eligible = staff.filter((person) => person.role === role);
   const options = createdParty && !parties.some((p) => p.id === createdParty.id)
     ? [...parties, createdParty] : parties;
 
   const chooseStaff = async (id: string) => {
-    setPending(true);
+    return run(async () => {
     const result = await prepareStaffPartyAction(id, role, linkExistingContact && value && !userId ? value : undefined);
-    setPending(false);
     if (!result.ok) {
       toast.error("Could not link system user", { description: result.error });
       return;
@@ -53,12 +53,13 @@ export function StaffOrContactSelect({
     setCreatedParty(result.data);
     onChange(result.data.id, id);
     router.refresh();
+    });
   };
 
   return (
     <div className="space-y-2">
       <div className="flex gap-1" role="group" aria-label="Participant type">
-        <Button type="button" size="sm" variant={mode === "staff" ? "secondary" : "ghost"}
+        <Button type="button" size="sm" disabled={pending} variant={mode === "staff" ? "secondary" : "ghost"}
           onClick={() => { setMode("staff"); if (clearOnModeChange) onChange("", undefined); }}>System user</Button>
         <Button type="button" size="sm" variant={mode === "contact" ? "secondary" : "ghost"}
           onClick={() => { setMode("contact"); if (clearOnModeChange) onChange("", undefined); }}>External contact</Button>

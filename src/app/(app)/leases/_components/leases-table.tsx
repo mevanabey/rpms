@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useSubmission } from "@/hooks/use-submission";
 
 import {
   CalendarDays,
@@ -217,6 +218,10 @@ function toggle<T>(set: Set<T>, value: T): Set<T> {
 
 export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
   const router = useRouter();
+  const { pending: submitting, run } = useSubmission();
+  const [refreshing, startRefresh] = useTransition();
+  const pending = submitting || refreshing;
+  const [busyLeaseId, setBusyLeaseId] = useState<string | null>(null);
   const user = useCurrentUser();
   const rentReminders = useRentReminders();
   const sendRentReminder = useDemoStore((s) => s.sendRentReminder);
@@ -335,22 +340,20 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
 
   /** Download one lease as an .xlsx intake checklist. */
   const exportChecklist = (leaseId: string) => {
-    const toastId = toast.loading("Building checklist…");
-    void (async () => {
+    void run(async () => {
+      setBusyLeaseId(leaseId);
       const res = await exportLeaseChecklistAction(leaseId);
       if (!res.ok) {
         toast.error("Could not export checklist", {
-          id: toastId,
           description: res.error,
         });
         return;
       }
       downloadBase64File(res.data.base64, res.data.fileName, XLSX_MIME_TYPE);
       toast.success("Checklist exported", {
-        id: toastId,
         description: res.data.fileName,
       });
-    })();
+    });
   };
 
   const handleMarkPaid = (row: LeaseRow) => {
@@ -360,11 +363,14 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
     const today = new Date().toISOString().slice(0, 10);
     const method =
       entry.amount.currency === "USD" ? "usd_transfer" : "lkr_transfer";
-    void markRentPaidAction(entry.id, {
+    if (pending) return;
+    void run(async () => {
+    setBusyLeaseId(row.lease.id);
+    const result = await markRentPaidAction(entry.id, {
       paidDate: today,
       paymentMethod: method,
       reference: `manual-${entry.id}`,
-    }).then((result) => {
+    });
       if (!result.ok) {
         toast.error("Could not mark paid", { description: result.error });
         return;
@@ -375,7 +381,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
           { currency: entry.amount.currency, noDecimals: true },
         )}`,
       });
-      router.refresh();
+      startRefresh(() => router.refresh());
     });
   };
 
@@ -687,7 +693,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                           size="sm"
                           variant="outline"
                           onClick={() => handleSendReminder(r)}
-                          disabled={!entry || alreadyPaid}
+                          disabled={pending || !entry || alreadyPaid}
                           title={
                             !entry
                               ? "No upcoming rent line"
@@ -712,7 +718,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                                 : `Mark ${formatCurrency(entry.amount.amount, { currency: entry.amount.currency, noDecimals: true })} as paid`
                           }
                         >
-                          <CheckCircle2 className="size-3.5" /> Mark paid
+                          <CheckCircle2 className="size-3.5" /> {pending && busyLeaseId === r.lease.id ? "Recording…" : "Mark paid"}
                         </Button>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -738,6 +744,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                               <Pencil className="size-3.5" /> Edit
                             </DropdownMenuItem>
                             <DropdownMenuItem
+                              disabled={pending}
                               onSelect={() => exportChecklist(r.lease.id)}
                             >
                               <FileSpreadsheet className="size-3.5" /> Export checklist

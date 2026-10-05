@@ -1,6 +1,7 @@
 "use client";
 
-import { useTransition } from "react";
+import { useSubmission } from "@/hooks/use-submission";
+
 import { useRouter } from "next/navigation";
 
 import { ChevronsUpDown, LogOut, UserCog } from "lucide-react";
@@ -35,7 +36,7 @@ export function UserMenu() {
   const logout = useDemoStore((s) => s.logout);
   const clearDemo = useDemoStore((s) => s.clearDemo);
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const { pending, run: startTransition, retain } = useSubmission();
 
   if (!user) return null;
 
@@ -43,7 +44,8 @@ export function UserMenu() {
     startTransition(async () => {
       try {
         const supabase = createClient();
-        await supabase.auth.signOut();
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
       } catch (e) {
         toast.error("Sign-out failed", {
           description: e instanceof Error ? e.message : String(e),
@@ -57,8 +59,8 @@ export function UserMenu() {
       } catch {
         // clearDemo throws if not hydrated yet — safe to ignore.
       }
-      router.replace("/login");
-      router.refresh();
+      retain();
+      window.location.assign("/login");
     });
   };
 
@@ -103,6 +105,7 @@ export function UserMenu() {
               </DropdownMenuItem>
             )}
             <DropdownMenuItem
+              disabled={pending}
               onSelect={(e) => {
                 e.preventDefault();
                 if (!pending) handleSignOut();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useSubmission } from "@/hooks/use-submission";
 import { useRouter } from "next/navigation";
 
 import { toast } from "sonner";
@@ -36,10 +36,10 @@ export function DeleteLeaseDialog({
   onDeleted?: () => void;
 }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const { pending, run: startTransition } = useSubmission();
 
   function confirm() {
-    startTransition(async () => {
+    void startTransition(async () => {
       const result = await deleteLeaseAction(leaseId);
       if (!result.ok) {
         toast.error("Could not delete lease", { description: result.error });
@@ -53,7 +53,7 @@ export function DeleteLeaseDialog({
   }
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialog open={open} onOpenChange={(next) => { if (!pending) onOpenChange(next); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete lease</AlertDialogTitle>

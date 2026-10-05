@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useState } from "react";
+import { useSubmission } from "@/hooks/use-submission";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -14,7 +15,6 @@ import {
   MessageSquare,
   Send,
   ShieldAlert,
-  Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -70,6 +70,7 @@ export default function TicketDetailPage({
   const updateStatus = useDemoStore((s) => s.updateTicketStatus);
   const addComment = useDemoStore((s) => s.addTicketComment);
   const [comment, setComment] = useState("");
+  const { pending, run } = useSubmission();
 
   if (!ticket) notFound();
 
@@ -169,6 +170,7 @@ export default function TicketDetailPage({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                void run(() => {
                 if (!comment.trim()) return;
                 addComment(ticket.id, {
                   author: "Capital Trust handler",
@@ -176,18 +178,21 @@ export default function TicketDetailPage({
                   kind: "note",
                 });
                 setComment("");
+                });
               }}
               className="flex flex-col gap-2 rounded-md border p-2"
+              aria-busy={pending}
             >
               <Textarea
                 placeholder="Add a note (vendor confirmed, photo attached, follow-up scheduled…)"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
+                disabled={pending}
                 rows={2}
               />
               <div className="flex justify-end">
-                <Button type="submit" size="sm" disabled={!comment.trim()}>
-                  <Send className="size-3.5" /> Add note
+                <Button type="submit" size="sm" disabled={pending || !comment.trim()}>
+                  <Send className="size-3.5" /> {pending ? "Adding note…" : "Add note"}
                 </Button>
               </div>
             </form>

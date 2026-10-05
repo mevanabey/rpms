@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { useSubmission } from "@/hooks/use-submission";
 
 import { Plus } from "lucide-react";
 import { useForm, type Resolver } from "react-hook-form";
@@ -71,7 +72,7 @@ export function NewUnitButton({
   onCreated?: (unit: Unit) => void;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
-  const [pending, startTransition] = useTransition();
+  const { pending, run } = useSubmission();
   const router = useRouter();
   const isControlled = openProp !== undefined;
   const open = isControlled ? openProp! : internalOpen;
@@ -90,7 +91,7 @@ export function NewUnitButton({
   });
 
   function onSubmit(values: Values) {
-    startTransition(async () => {
+    return run(async () => {
       const result = await createUnitAction({
         propertyId: values.propertyId,
         label: values.label,
@@ -119,7 +120,7 @@ export function NewUnitButton({
   const allProperties = properties;
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={(next) => { if (!pending) setOpen(next); }}>
       {!hideTrigger && (
         <SheetTrigger asChild>
           {trigger ?? (
@@ -139,8 +140,10 @@ export function NewUnitButton({
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(onSubmit)}
+            aria-busy={pending || form.formState.isSubmitting}
             className="flex flex-col gap-4 px-4 pb-4"
           >
+            <fieldset disabled={pending || form.formState.isSubmitting} className="contents">
             {lockProperty ? (
               <input type="hidden" {...form.register("propertyId")} />
             ) : (
@@ -272,7 +275,7 @@ export function NewUnitButton({
               />
             </div>
             <SheetFooter className="px-0 pt-4">
-              <Button type="submit" disabled={pending}>
+              <Button type="submit" disabled={pending || form.formState.isSubmitting}>
                 {pending ? "Adding…" : "Add unit"}
               </Button>
               <Button
@@ -284,6 +287,7 @@ export function NewUnitButton({
                 Cancel
               </Button>
             </SheetFooter>
+            </fieldset>
           </form>
         </Form>
       </SheetContent>
