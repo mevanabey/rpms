@@ -3,7 +3,7 @@
  *
  * Scope: MVP routes (SPEC §0.1) — Dashboard, /properties, /leases, /rent,
  * /admin/*. Notification, workflow_run, maintenance_ticket,
- * introducer_commission, audit_log are intentionally deferred until their
+ * introducer_commission are intentionally deferred until their
  * routes come back on; add them here when they do.
  *
  * Conventions:
@@ -253,6 +253,9 @@ export const lease = pgTable(
   "lease",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** Set by the database from the authenticated transaction actor. Retained
+     * when an Auth account is deleted so authorship is never lost. */
+    createdBy: uuid("created_by"),
     legalEntityId: uuid("legal_entity_id")
       .notNull()
       .references(() => legalEntity.id, { onDelete: "restrict" }),
@@ -509,6 +512,8 @@ export const userRole = pgTable(
   {
     userId: uuid("user_id").primaryKey(), // FK to auth.users(id) — referenced in raw SQL via migration
     role: varchar("role", { length: 32 }).notNull(),
+    roles: text("roles").array().notNull().default([]),
+    passwordSetupRequired: boolean("password_setup_required").notNull().default(false),
     entities: text("entities").array().notNull().default([]),
     assignedLeaseIds: uuid("assigned_lease_ids").array().notNull().default([]),
     partyId: uuid("party_id").references(() => party.id, {
@@ -523,6 +528,24 @@ export const userRole = pgTable(
       .defaultNow(),
   },
 );
+
+/** Append-only lease history. Actor snapshots survive deleted accounts;
+ * before/after values preserve every field change. No cascade to leases. */
+export const leaseAudit = pgTable("lease_audit", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  leaseId: uuid("lease_id").notNull(),
+  actorId: uuid("actor_id"),
+  actorName: text("actor_name").notNull(),
+  actorEmail: text("actor_email"),
+  action: text("action").notNull(),
+  tableName: text("table_name").notNull(),
+  recordId: text("record_id"),
+  operation: text("operation").notNull(),
+  before: jsonb("before").$type<Record<string, unknown>>(),
+  after: jsonb("after").$type<Record<string, unknown>>(),
+  details: jsonb("details").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("lease_audit_lease_time_idx").on(t.leaseId, t.createdAt)]);
 
 // ───────────────────────────────────────────────────────── Relations
 // Required by Drizzle's relational query API (`db.query.lease.findMany({ with: { ... } })`).

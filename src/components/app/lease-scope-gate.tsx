@@ -18,7 +18,7 @@ import { useCurrentUser } from "@/lib/demo/use-store";
 /**
  * Per-lease scope gate. Wrap any page whose data is keyed to a single lease.
  * Lawyers see an "Out of scope" screen if the lease isn't on their assignment
- * list. Admins and account managers always pass.
+ * list or they did not create it. Only admins always pass.
  */
 export function LeaseScopeGate({
   leaseId,
@@ -47,7 +47,7 @@ export function LeaseScopeGate({
             <div>
               <CardTitle className="text-lg">Out of your scope</CardTitle>
               <CardDescription className="mt-0.5 text-sm">
-                This lease isn’t on your assignment list. Ask an admin if you
+                This lease isn’t assigned to you or created by you. Ask an admin if you
                 believe this is wrong.
               </CardDescription>
             </div>

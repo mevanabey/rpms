@@ -1,6 +1,9 @@
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { sql } from "drizzle-orm";
+import type { AppUser } from "@/lib/demo/identity";
 
 /**
  * Drizzle client backed by Supabase's pooled connection (port 6543, Transaction
@@ -25,9 +28,7 @@ import * as schema from "./schema";
  */
 
 declare global {
-  // eslint-disable-next-line no-var
   var __rpms_pg: ReturnType<typeof postgres> | undefined;
-  // eslint-disable-next-line no-var
   var __rpms_drizzle: PostgresJsDatabase<typeof schema> | undefined;
 }
 
@@ -57,6 +58,39 @@ function buildClient(): PostgresJsDatabase<typeof schema> {
   return globalThis.__rpms_drizzle;
 }
 
-export const db: PostgresJsDatabase<typeof schema> = buildClient();
+type AppDatabase = Pick<PostgresJsDatabase<typeof schema>,
+  "select" | "selectDistinct" | "insert" | "update" | "delete" | "execute" | "query" | "transaction">;
+const rootDb = buildClient();
+const transactionContext = new AsyncLocalStorage<AppDatabase>();
+
+/** Existing adapters transparently use the current audited transaction,
+ * including their nested transactions (savepoints). AsyncLocalStorage keeps
+ * concurrent requests and pooled connections isolated. */
+export const db: AppDatabase = new Proxy<AppDatabase>(rootDb, {
+  get(_target, key) {
+    const target = transactionContext.getStore() ?? rootDb;
+    const value = Reflect.get(target, key);
+    return typeof value === "function" ? value.bind(target) : value;
+  },
+});
+
+export async function withAudit<T>(
+  actor: Pick<AppUser, "id" | "name" | "email">,
+  action: string,
+  operation: () => Promise<T>,
+  details: Record<string, unknown> = {},
+): Promise<T> {
+  // Preserve the outer actor/action across nested backend mutations.
+  if (transactionContext.getStore()) return operation();
+  return rootDb.transaction(async (tx) => {
+    await tx.execute(sql`select
+      set_config('rpms.actor_id', ${actor.id}, true),
+      set_config('rpms.actor_name', ${actor.name}, true),
+      set_config('rpms.actor_email', ${actor.email}, true),
+      set_config('rpms.action', ${action}, true),
+      set_config('rpms.details', ${JSON.stringify(details)}, true)`);
+    return transactionContext.run(tx, operation);
+  });
+}
 
 export { schema };

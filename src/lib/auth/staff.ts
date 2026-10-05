@@ -4,6 +4,7 @@ import type { User } from "@supabase/supabase-js";
 import { inArray } from "drizzle-orm";
 
 import { requireResource } from "@/lib/auth/authorization";
+import { can, DEFAULT_PERMISSIONS, rolesFor } from "@/lib/demo/identity";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { db } from "@/server/db/client";
 import { userRole } from "@/server/db/schema";
@@ -19,7 +20,7 @@ export interface StaffUser {
 /** Only lease editors receive the account directory. Contacts remain separate. */
 export async function getAssignableStaff(): Promise<StaffUser[]> {
   const caller = await requireResource("leases:read");
-  if (caller.role !== "admin" && caller.role !== "account_manager") return [];
+  if (!can(caller, DEFAULT_PERMISSIONS, "leases:write")) return [];
 
   const authUsers: User[] = [];
   for (let page = 1; ; page += 1) {
@@ -34,9 +35,12 @@ export async function getAssignableStaff(): Promise<StaffUser[]> {
   const byId = new Map(roles.map((role) => [role.userId, role]));
   return users.flatMap((user): StaffUser[] => {
     const row = byId.get(user.id);
-    if (!row?.isActive || !["lawyer", "accountant", "advisor"].includes(row.role)) return [];
+    if (!row?.isActive) return [];
     const email = user.email!;
     const name = String(user.user_metadata?.full_name ?? user.user_metadata?.name ?? email.split("@")[0]);
-    return [{ id: user.id, email, name, role: row.role as StaffUser["role"], partyId: row.partyId ?? undefined }];
+    return rolesFor(row).flatMap((role): StaffUser[] => {
+      if (role !== "lawyer" && role !== "accountant" && role !== "advisor") return [];
+      return [{ id: user.id, email, name, role, partyId: row.partyId ?? undefined }];
+    });
   }).sort((a, b) => a.name.localeCompare(b.name));
 }

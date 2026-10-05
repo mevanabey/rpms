@@ -35,11 +35,13 @@ import {
 } from "@/templates/leases/lease-document-data";
 import {
   DEFAULT_PERMISSIONS,
+  can,
+  rolesFor,
   type AppUser,
   type Resource,
 } from "@/lib/demo/identity";
 import { getBackend } from "@/server/container";
-import { db } from "@/server/db/client";
+import { db, withAudit } from "@/server/db/client";
 import { ledgerEntry as ledgerEntryTable, party as partyTable, userRole as userRoleTable } from "@/server/db/schema";
 import { eq, inArray, sql } from "drizzle-orm";
 import { toParty } from "@/server/adapters/supabase/mappers";
@@ -104,8 +106,7 @@ async function requireLedgerAccess(ledgerEntryId: string): Promise<void> {
  * sidebar use, so deny decisions match what the UI advertised.
  */
 function userCan(user: AppUser, resource: Resource): boolean {
-  const list = DEFAULT_PERMISSIONS[user.role];
-  return Array.isArray(list) && list.includes(resource);
+  return can(user, DEFAULT_PERMISSIONS, resource);
 }
 
 async function authorizeWrite(resource: Resource): Promise<AppUser> {
@@ -133,7 +134,7 @@ async function validateParticipants(roles: LeasePartyRole[] | undefined): Promis
   for (const participant of linked) {
     const user = byId.get(participant.userId!);
     if (!user?.isActive || user.partyId !== participant.partyId ||
-        !ASSIGNMENT_ROLES[user.role]?.includes(participant.role)) {
+        !rolesFor(user).some((role) => ASSIGNMENT_ROLES[role]?.includes(participant.role))) {
       throw new Error("A system user must have a matching role and linked party before assignment.");
     }
   }
@@ -378,7 +379,7 @@ export async function prepareStaffPartyAction(
   existingPartyId?: string,
 ): Promise<ActionResult<Party>> {
   try {
-    await authorizeWrite("leases:write");
+    const actor = await authorizeWrite("leases:write");
     z.string().uuid().parse(userId);
     if (existingPartyId) z.string().uuid().parse(existingPartyId);
     if (!ASSIGNMENT_ROLES[role]) throw new Error("Invalid staff role.");
@@ -386,10 +387,10 @@ export async function prepareStaffPartyAction(
     if (error || !data.user?.email) throw new Error("System user not found.");
     const authUser = data.user;
     const name = String(authUser.user_metadata?.full_name ?? authUser.user_metadata?.name ?? authUser.email!.split("@")[0]);
-    const contact = await db.transaction(async (tx) => {
+    const contact = await withAudit(actor, "Staff contact linked", () => db.transaction(async (tx) => {
       await tx.execute(sql`select user_id from user_role where user_id = ${userId} for update`);
       const [linked] = await tx.select().from(userRoleTable).where(eq(userRoleTable.userId, userId)).limit(1);
-      if (!linked?.isActive || linked.role !== role) {
+      if (!linked?.isActive || !rolesFor(linked).includes(role)) {
         throw new Error("Select an active system user with the matching role.");
       }
       if (linked.partyId) {
@@ -422,7 +423,7 @@ export async function prepareStaffPartyAction(
       await tx.update(userRoleTable).set({ partyId: created.id, updatedAt: new Date() })
         .where(eq(userRoleTable.userId, userId));
       return toParty(created);
-    });
+    }));
     revalidateAll();
     return { ok: true, data: contact };
   } catch (e) {
@@ -434,7 +435,7 @@ export async function createPartyAction(
   input: PartyCreateInput,
 ): Promise<ActionResult<Party>> {
   try {
-    await authorizeWrite("parties:write");
+    await authorizeWrite("parties:create");
     const parsed = partyCreateSchema.parse(input);
     const data = await getBackend().parties.create(parsed as PartyCreateInput);
     revalidateAll();
@@ -448,7 +449,7 @@ export async function createPropertyAction(
   input: PropertyCreateInput,
 ): Promise<ActionResult<Property>> {
   try {
-    await authorizeWrite("properties:write");
+    await authorizeWrite("properties:create");
     const parsed = propertyCreateSchema.parse(input);
     const data = await getBackend().properties.createProperty(
       parsed as PropertyCreateInput,
@@ -464,7 +465,7 @@ export async function createUnitAction(
   input: UnitCreateInput,
 ): Promise<ActionResult<Unit>> {
   try {
-    await authorizeWrite("units:write");
+    await authorizeWrite("units:create");
     const parsed = unitCreateSchema.parse(input);
     const data = await getBackend().properties.createUnit(parsed as UnitCreateInput);
     revalidateAll();
@@ -480,6 +481,7 @@ export async function createLeaseAction(
   try {
     await authorizeWrite("leases:create");
     const parsed = leaseCreateSchema.parse(intent);
+    if (parsed.parentLeaseId) await requireLeaseAccess(parsed.parentLeaseId);
     await validateParticipants(parsed.additionalRoles);
     const data = await getBackend().leases.create(parsed as LeaseCreateIntent);
     revalidateAll();
@@ -610,10 +612,16 @@ export async function setLeaseOnboardingStageAction(
 ): Promise<ActionResult<Lease>> {
   try {
     z.string().uuid().parse(id);
-    await requireLeaseAccess(id, "leases:write");
+    const user = await requireLeaseAccess(id, "leases:write");
     if (stage !== null && !VALID_STAGES.has(stage)) {
       throw new Error(`Invalid onboarding stage: ${stage}`);
     }
+    const lease = await getBackend().leases.get(id);
+    if (!lease) throw new Error("Lease not found.");
+    if (stage === null && !rolesFor(user).includes("admin")) throw new Error("Only an admin can reset onboarding.");
+    if (stage === "agreement_ready" && !lease.agreementPath) throw new Error("Generate or upload an agreement first.");
+    if ((stage === "emails_sent" || stage === "at_accounts") && (!lease.lawyerEmailSentAt || !lease.advisorEmailSentAt)) throw new Error("Confirm the lawyer and advisor emails first.");
+    if (stage === "at_accounts" && !lease.accountsEmailSentAt) throw new Error("Confirm the accounts email first.");
     const data = await getBackend().leases.setOnboardingStage(id, stage);
     revalidateLease(id);
     return { ok: true, data };
@@ -673,7 +681,7 @@ export async function generateLeaseAgreementAction(
       });
     if (upErr) throw new Error(`Upload failed: ${upErr.message}`);
 
-    const updated = await backend.leases.markAgreementGenerated(leaseId, path);
+    const updated = await withAudit(await requireAppUser(), "Lease agreement generated", () => backend.leases.markAgreementGenerated(leaseId, path), { path });
 
     const { data: urlData, error: urlErr } = await sb.storage
       .from(LEASE_DOCUMENTS_BUCKET)
@@ -714,7 +722,7 @@ export async function uploadLeaseAgreementAction(
       .from(LEASE_DOCUMENTS_BUCKET)
       .upload(path, bytes, { contentType: file.type, upsert: false });
     if (upErr) throw new Error(`Upload failed: ${upErr.message}`);
-    const data = await getBackend().leases.markAgreementGenerated(leaseId, path);
+    const data = await withAudit(await requireAppUser(), "Lease agreement uploaded", () => getBackend().leases.markAgreementGenerated(leaseId, path), { filename: file.name, path, bytes: file.size });
     revalidateLease(leaseId);
     return { ok: true, data };
   } catch (e) {
@@ -737,6 +745,7 @@ export async function markLeaseAgreementGeneratedAction(
     z.string().uuid().parse(leaseId);
     await requireLeaseAccess(leaseId, "leases:write");
     z.string().min(1).parse(storagePath);
+    if (!storagePath.startsWith(`${leaseId}/`) || storagePath.includes("..")) throw new Error("Invalid lease document path.");
     const data = await getBackend().leases.markAgreementGenerated(leaseId, storagePath);
     revalidateLease(leaseId);
     return { ok: true, data };
@@ -786,6 +795,15 @@ export async function sendLeaseEmailAction(
     }));
     const to = resolveLeaseRecipients(lease, kind, byId, linkedUsers);
 
+    const alreadySent = kind === "lawyer" ? lease.lawyerEmailSentAt : kind === "advisor" ? lease.advisorEmailSentAt : lease.accountsEmailSentAt;
+    if (alreadySent) throw new Error("This email has already been confirmed as sent.");
+    if (lease.status !== "draft" || (kind === "accounts" ? lease.onboardingStage !== "emails_sent" : lease.onboardingStage !== "agreement_ready")) {
+      throw new Error("Complete the preceding workflow step before sending this email.");
+    }
+    if (process.env.MAIL_TRANSPORT !== "smtp") {
+      throw new Error("Email delivery is not configured. Send the email outside RPMS, then use the manual confirmation.");
+    }
+
     const attachments = await loadAgreementAttachment(lease);
     const body = buildLeaseEmail({
       kind,
@@ -804,8 +822,13 @@ export async function sendLeaseEmailAction(
     });
 
     const result = await getMailer().send({ ...body, to, attachments });
+    if (result.redirected || result.rejected.length || !to.every((recipient) => result.accepted.some((address) => address.toLowerCase() === recipient.email.toLowerCase()))) {
+      throw new Error("The email did not reach all intended recipients. The workflow has not advanced; use manual confirmation after sending it to them.");
+    }
 
-    const data = await backend.leases.markLeaseEmailSent(leaseId, kind);
+    const data = await withAudit(user, "Lease email sent", () => backend.leases.markLeaseEmailSent(leaseId, kind), {
+      kind, recipients: to.map((recipient) => recipient.email), method: "email", redirected: result.redirected,
+    });
     revalidateLease(leaseId);
     return {
       ok: true,
@@ -819,6 +842,26 @@ export async function sendLeaseEmailAction(
     console.error("[sendLeaseEmailAction]", e);
     return fail(e);
   }
+}
+
+/** Records an email sent outside RPMS and uses the same guarded stage rules. */
+export async function markLeaseEmailManuallySentAction(
+  leaseId: string,
+  input: { kind: "lawyer" | "advisor" | "accounts"; recipients: string[]; note: string },
+): Promise<ActionResult<Lease>> {
+  try {
+    z.string().uuid().parse(leaseId);
+    const user = await requireLeaseAccess(leaseId, "leases:write");
+    const parsed = z.object({
+      kind: z.enum(["lawyer", "advisor", "accounts"]),
+      recipients: z.array(z.string().trim().email()).min(1).max(30),
+      note: z.string().trim().min(3, "Add a note identifying the email sent.").max(2000),
+    }).strict().parse(input);
+    const data = await withAudit(user, "Email marked sent manually", () =>
+      getBackend().leases.markLeaseEmailSent(leaseId, parsed.kind), { ...parsed, method: "manual" });
+    revalidateLease(leaseId);
+    return { ok: true, data };
+  } catch (e) { return fail(e); }
 }
 
 /** Short human reference for subject lines: "Lucky Seven — L4, L5". */
@@ -874,13 +917,16 @@ export async function markLeaseActiveAction(
 ): Promise<ActionResult<Lease & { rentEntriesCreated: number }>> {
   try {
     z.string().uuid().parse(leaseId);
-    await requireLeaseAccess(leaseId, "leases:write");
+    const user = await requireLeaseAccess(leaseId, "leases:write");
     const backend = getBackend();
-    const data = await backend.leases.markLeaseActive(leaseId);
+    const { data, result } = await withAudit(user, "Lease activated", async () => {
+      const data = await backend.leases.markLeaseActive(leaseId);
+      const result = await backend.leases.generateRentSchedule(leaseId);
+      return { data, result };
+    });
     // Pre-create the unpaid monthly rent ledger entries so the Rent /
     // Recent ledger / Mark-as-Paid surfaces all see them immediately. Safe
     // to re-run — generateRentSchedule skips months that already exist.
-    const result = await backend.leases.generateRentSchedule(leaseId);
     revalidateLease(leaseId);
     return { ok: true, data: { ...data, rentEntriesCreated: result.created } };
   } catch (e) {
@@ -940,7 +986,7 @@ export async function uploadSignedLeaseAction(
 ): Promise<ActionResult<Lease>> {
   try {
     z.string().uuid().parse(leaseId);
-    await requireLeaseAccess(leaseId, "leases:write");
+    const user = await requireLeaseAccess(leaseId, "leases:write");
     const file = formData.get("file");
     if (!(file instanceof File)) {
       throw new Error("No file provided.");
@@ -967,9 +1013,11 @@ export async function uploadSignedLeaseAction(
     }
 
     const backend = getBackend();
-    const data = await backend.leases.attachSignedLease(leaseId, path);
-    // attachSignedLease flips status to active — materialise rent schedule.
-    await backend.leases.generateRentSchedule(leaseId);
+    const data = await withAudit(user, "Signed lease uploaded", async () => {
+      const data = await backend.leases.attachSignedLease(leaseId, path);
+      await backend.leases.generateRentSchedule(leaseId);
+      return data;
+    }, { filename: file.name, path, bytes: file.size });
     revalidateLease(leaseId);
     return { ok: true, data };
   } catch (e) {

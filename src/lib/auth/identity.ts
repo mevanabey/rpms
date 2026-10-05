@@ -1,25 +1,17 @@
 import "server-only";
 import { cache } from "react";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { getAuthUser } from "@/lib/supabase/auth";
-import type { AppUser, Role } from "@/lib/demo/identity";
+import { rolesFor, type AppUser } from "@/lib/demo/identity";
 import { db } from "@/server/db/client";
-import { leasePartyRoleTable, userRole as userRoleTable } from "@/server/db/schema";
+import { lease as leaseTable, leasePartyRoleTable, userRole as userRoleTable } from "@/server/db/schema";
 
 const PARTICIPANT_ROLES = {
   lawyer: ["lessor_lawyer", "lessee_lawyer"],
   accountant: ["accountant_handler"],
   advisor: ["advisor"],
 } as const;
-
-/**
- * Roles known to the permissions matrix in `src/lib/demo/identity.ts`.
- * `viewer` is the auto-provisioned default for users without an explicit
- * entry — read-only, sees nothing privileged. Promotions happen in
- * /admin/users.
- */
-const DEFAULT_NEW_USER_ROLE: Role = "viewer";
 
 function deriveDisplayName(email: string, metadataName?: string | null): string {
   if (metadataName && metadataName.trim()) return metadataName.trim();
@@ -31,68 +23,28 @@ function deriveDisplayName(email: string, metadataName?: string | null): string 
     .join(" ");
 }
 
-/**
- * Atomic upsert of the user_role row. INSERT ... ON CONFLICT DO UPDATE
- * always returns the row, so concurrent layout renders never race against
- * each other (the previous SELECT-then-INSERT pattern was a duplicate-key
- * waiting to happen the moment Next.js re-rendered the layout twice).
- *
- * The DO UPDATE just touches `updated_at` — we never overwrite an admin's
- * role/entities accidentally.
- */
-async function upsertUserRoleRow(userId: string) {
-  const [row] = await db
-    .insert(userRoleTable)
-    .values({
-      userId,
-      role: DEFAULT_NEW_USER_ROLE,
-      entities: [],
-      assignedLeaseIds: [],
-      isActive: true,
-    })
-    .onConflictDoUpdate({
-      target: userRoleTable.userId,
-      set: { updatedAt: sql`now()` },
-    })
-    .returning();
-  return row;
-}
-
-/**
- * Resolves the currently-authenticated AppUser from the Supabase session
- * and the `user_role` table.
- *
- * Behaviour:
- *   - No Supabase session                       → returns null
- *   - First-time user (no user_role row)         → atomically provisions a
- *                                                  `viewer` row, returns AppUser
- *   - Existing user, `is_active = false`         → returns null (treated as
- *                                                  signed out)
- *   - DB unavailable / transient error           → throws (the layout will
- *                                                  surface a server error
- *                                                  rather than silently
- *                                                  signing the user out)
- *
- * Wrapped in `React.cache` so Server Components in a single request share
- * one resolution.
- */
-export const getCurrentAppUser = cache(async (): Promise<AppUser | null> => {
+/** Verified Supabase session paired with an explicitly provisioned access row.
+ * Unknown accounts are never auto-provisioned. Request-level caching shares
+ * the lookup between layouts, pages, and server actions. */
+export const getAccountAccess = cache(async () => {
   const sbUser = await getAuthUser();
   if (!sbUser?.email) return null;
 
-  // Try a plain SELECT first — the common case is "row already exists".
-  // Only fall through to the upsert on a miss.
-  let [row] = await db
+  const [row] = await db
     .select()
     .from(userRoleTable)
     .where(eq(userRoleTable.userId, sbUser.id))
     .limit(1);
+  return row ? { authUser: sbUser, row } : null;
+});
 
-  if (!row) {
-    row = await upsertUserRoleRow(sbUser.id);
-  }
+export const getCurrentAppUser = cache(async (): Promise<AppUser | null> => {
+  const access = await getAccountAccess();
+  if (!access) return null;
+  const { authUser: sbUser, row } = access;
 
-  if (!row || row.isActive === false) {
+  // Only explicitly provisioned active accounts may enter RPMS.
+  if (!row || !row.isActive || row.passwordSetupRequired) {
     return null;
   }
 
@@ -100,33 +52,43 @@ export const getCurrentAppUser = cache(async (): Promise<AppUser | null> => {
     (sbUser.user_metadata?.name as string | undefined) ??
     (sbUser.user_metadata?.full_name as string | undefined);
 
-  const name = deriveDisplayName(sbUser.email, metadataName);
+  const name = deriveDisplayName(sbUser.email!, metadataName);
   const initials = name
     .split(/\s+/)
     .map((p) => p[0]?.toUpperCase() ?? "")
     .join("")
     .slice(0, 2);
 
-  const participantRoles = PARTICIPANT_ROLES[row.role as keyof typeof PARTICIPANT_ROLES];
-  const assignments = participantRoles
+  const roleIds = rolesFor(row);
+  const participantRoles = roleIds.flatMap((role) => {
+    if (role === "lawyer") return [...PARTICIPANT_ROLES.lawyer];
+    if (role === "accountant") return [...PARTICIPANT_ROLES.accountant];
+    if (role === "advisor") return [...PARTICIPANT_ROLES.advisor];
+    return [];
+  });
+  const assignments = participantRoles.length
     ? await db
         .select({ leaseId: leasePartyRoleTable.leaseId })
         .from(leasePartyRoleTable)
         .where(and(
           eq(leasePartyRoleTable.userId, sbUser.id),
-          inArray(leasePartyRoleTable.role, [...participantRoles]),
+          inArray(leasePartyRoleTable.role, participantRoles),
         ))
     : [];
+  const created = await db.select({ id: leaseTable.id }).from(leaseTable)
+    .where(eq(leaseTable.createdBy, sbUser.id));
 
   return {
     id: sbUser.id,
     name,
-    email: sbUser.email,
+    email: sbUser.email!,
     role: row.role,
+    roles: roleIds,
     entities: row.entities ?? [],
     initials,
     partyId: row.partyId ?? undefined,
     assignedLeaseIds: assignments.map((assignment) => assignment.leaseId),
+    createdLeaseIds: created.map((item) => item.id),
   };
 });
 

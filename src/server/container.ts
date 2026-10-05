@@ -4,6 +4,7 @@ import type { Backend } from "@/core/services";
 
 import { mockBackend } from "./adapters/mock";
 import { supabaseBackend } from "./adapters/supabase";
+import { secureBackend } from "./secured-backend";
 
 const VALID_KINDS = ["mock", "supabase", "vercel", "agentfabriq"] as const;
 type BackendKind = (typeof VALID_KINDS)[number];
@@ -24,7 +25,7 @@ function resolveBackend(): Backend {
     case "mock":
       return mockBackend;
     case "supabase":
-      return supabaseBackend;
+      return secureBackend(supabaseBackend);
     case "vercel":
       throw new Error(
         "BACKEND=vercel adapter is Phase 02 — see src/server/adapters/vercel/README.md",

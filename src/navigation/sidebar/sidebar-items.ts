@@ -1,6 +1,6 @@
 import {
+  Activity,
   Building2,
-  ClipboardCheck,
   Database,
   FilePlus2,
   FileSignature,
@@ -55,7 +55,7 @@ const rpmsNav: NavGroup[] = [
     items: [
       { title: "Dashboard", url: "/", icon: LayoutDashboard },
       // { title: "Tasks", url: "/tasks", icon: ShieldQuestion, requires: ["tasks:read"] },
-      // { title: "Activity", url: "/activity", icon: Activity },
+      { title: "Activity", url: "/activity", icon: Activity, requires: ["leases:read"] },
       // { title: "Automation", url: "/automation", icon: GraduationCap, requires: ["automation:read"] },
     ],
   },

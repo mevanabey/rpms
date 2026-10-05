@@ -1,5 +1,8 @@
+import { can, DEFAULT_PERMISSIONS } from "@/lib/demo/identity";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { listLeaseAudit } from "@/server/audit";
+import { LeaseAuditHistory } from "@/components/app/lease-audit-history";
 
 import { ArrowLeft, ArrowUpRight, Building2, GitBranch, MapPin, Mail, Phone } from "lucide-react";
 
@@ -87,10 +90,12 @@ export default async function LeaseDetailPage({
   const user = await requireLeaseAccess(id);
   // The leases list links here with ?edit=1 for its row-level Edit action —
   // the lease detail page is the one and only place a lease is edited.
-  const startInEditMode = (user.role === "admin" || user.role === "account_manager") && query.edit === "1";
+  const startInEditMode = (can(user, DEFAULT_PERMISSIONS, "leases:write")) && query.edit === "1";
   const backend = getBackend();
   const lease = await backend.leases.get(id);
   if (!lease) notFound();
+  const historyPage = Math.max(1, Number(query.historyPage) || 1);
+  const history = await listLeaseAudit({ leaseId: id, page: historyPage, pageSize: 25 });
 
   const [allParties, propertyAll, propertyUnits, allObligations, allLedger, allLeases, staff] = await Promise.all([
     backend.parties.list(),
@@ -99,10 +104,10 @@ export default async function LeaseDetailPage({
     backend.payments.listObligations(lease.id),
     backend.payments.listLedger({ leaseId: lease.id }),
     backend.leases.list(),
-    user.role === "admin" || user.role === "account_manager" ? getAssignableStaff() : Promise.resolve([]),
+    can(user, DEFAULT_PERMISSIONS, "leases:write") ? getAssignableStaff() : Promise.resolve([]),
   ]);
   const visibleLeases = scopeByLease(user, allLeases, (item) => item.id);
-  const canEdit = user.role === "admin" || user.role === "account_manager";
+  const canEdit = can(user, DEFAULT_PERMISSIONS, "leases:write");
   const partyIds = new Set([
     lease.lessorPartyId,
     lease.lesseePartyId,
@@ -177,6 +182,7 @@ export default async function LeaseDetailPage({
   return (
     <LeaseScopeGate leaseId={lease.id}>
     <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
+
       <LeaseEditBootstrap leaseId={lease.id} edit={startInEditMode} />
       <div data-onborda="lease-detail-header">
         <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2">
@@ -710,6 +716,16 @@ export default async function LeaseDetailPage({
         units={units}
         readOnly={!canEdit}
       />
+      <Card>
+        <CardHeader><CardTitle>Lease history</CardTitle><CardDescription>Who created, edited, uploaded, progressed, and recorded payments for this lease. {history.total} changes recorded.</CardDescription></CardHeader>
+        <CardContent>
+          <LeaseAuditHistory entries={history.entries} />
+          <div className="flex gap-4 mt-4 text-sm">
+            {history.page > 1 && <Link className="text-primary hover:underline" href={`?historyPage=${history.page - 1}`}>Newer changes</Link>}
+            {history.page * history.pageSize < history.total && <Link className="text-primary hover:underline" href={`?historyPage=${history.page + 1}`}>Older changes</Link>}
+          </div>
+        </CardContent>
+      </Card>
     </div>
     </LeaseScopeGate>
   );

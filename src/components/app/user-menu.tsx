@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useDemoStore } from "@/lib/demo/store";
 import { useCanCheck, useCurrentUser } from "@/lib/demo/use-store";
+import { rolesFor } from "@/lib/demo/identity";
 import { createClient } from "@/lib/supabase/client";
 import { getInitials } from "@/lib/utils";
 
@@ -77,7 +78,7 @@ export function UserMenu() {
               </Avatar>
               <div className="grid flex-1 text-left leading-tight">
                 <span className="truncate font-medium text-sm">{user.name}</span>
-                <RolePill role={user.role} size="sm" className="mt-0.5 w-fit" />
+                <div className="flex gap-1 flex-wrap">{rolesFor(user).map((role) => <RolePill key={role} role={role} size="sm" className="mt-0.5 w-fit" />)}</div>
               </div>
               <ChevronsUpDown className="ml-auto size-4 opacity-60" />
             </SidebarMenuButton>

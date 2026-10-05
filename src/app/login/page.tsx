@@ -1,27 +1,22 @@
 import { redirect } from "next/navigation";
 
-import {
-  Building2,
-  CheckCircle2,
-  FileSignature,
-  ShieldCheck,
-} from "lucide-react";
+import { Building2 } from "lucide-react";
 
-import { getAuthUser } from "@/lib/supabase/auth";
+import { getAccountAccess } from "@/lib/auth/identity";
 
 import { AuthCard } from "./_components/auth-card";
 
 /**
- * Public sign-in / sign-up page. If a Supabase session already exists,
- * bounce to the dashboard so the user doesn't re-authenticate.
+ * Staff-only sign-in, first-password setup, and password recovery.
  */
 export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const user = await getAuthUser();
-  if (user) {
+  const access = await getAccountAccess();
+  if (access?.row.isActive && access.row.passwordSetupRequired) redirect("/auth/update-password");
+  if (access?.row.isActive) {
     redirect("/");
   }
   const { error } = await searchParams;
@@ -59,7 +54,7 @@ export default async function LoginPage({
                 <br />
               </h2>
               <p className="mt-4 max-w-md text-muted-foreground text-sm leading-relaxed">
-                Login to you Capital Trust Rental Management System workspace.
+                Log in to your Capital Trust Rental Management System workspace.
               </p>
             </div>
           </div>
@@ -90,14 +85,14 @@ export default async function LoginPage({
                 Sign in to your workspace
               </h1>
               <p className="mt-2 text-muted-foreground text-sm">
-                Use your Capital Trust email. New accounts start read-only — an
-                admin grants the right role.
+                Access is limited to accounts created by your administrator.
+                First time here? Use Set your password below.
               </p>
             </div>
 
             {error && (
               <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-destructive text-sm">
-                {decodeURIComponent(error)}
+                {error}
               </div>
             )}
 
@@ -111,22 +106,5 @@ export default async function LoginPage({
         </main>
       </div>
     </div>
-  );
-}
-
-function FeatureRow({
-  icon: Icon,
-  children,
-}: {
-  icon: typeof Building2;
-  children: React.ReactNode;
-}) {
-  return (
-    <li className="flex items-start gap-3">
-      <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md border bg-background">
-        <Icon className="size-3.5 text-primary" />
-      </div>
-      <span className="text-muted-foreground">{children}</span>
-    </li>
   );
 }

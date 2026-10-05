@@ -40,6 +40,8 @@ import { downloadInvoice } from "@/templates/leases/lease-invoice";
 import { MarkRentPaidDialog } from "./mark-rent-paid-dialog";
 import { useOptimisticPaidEntries } from "./use-lease-payments-store";
 import { useProgressOpen } from "./use-progress-collapse";
+import { ManualEmailDialog } from "./manual-email-dialog";
+import { useCanCheck } from "@/lib/demo/use-store";
 
 interface Stage {
   key: "draft" | "send_emails" | "advisor_approval" | "accounts" | "active";
@@ -450,6 +452,8 @@ function SendEmailsPanel({
         <Send className="size-3.5" />
         {busy ? "Sending…" : lawyerSent && advisorSent ? "Both sent" : "Send Emails"}
       </Button>
+      <ManualEmailDialog leaseId={leaseId} kind="lawyer" disabled={busy || lawyerSent} onLeaseUpdated={onLeaseUpdated} />
+      <ManualEmailDialog leaseId={leaseId} kind="advisor" disabled={busy || advisorSent} onLeaseUpdated={onLeaseUpdated} />
     </PanelShell>
   );
 }
@@ -477,6 +481,7 @@ function AdvisorApprovalPanel({ leaseId, onLeaseUpdated }: PanelProps) {
         {busy ? "Saving…" : "Mark Approved · Send to accounts"}
         <ArrowRight className="size-3.5" />
       </Button>
+      <ManualEmailDialog leaseId={leaseId} kind="accounts" disabled={busy} onLeaseUpdated={onLeaseUpdated} />
     </PanelShell>
   );
 }
@@ -519,6 +524,7 @@ function ActivePanel({
   serverPaidEntryIds,
   today,
 }: PanelProps) {
+  const can = useCanCheck();
   const router = useRouter();
   // Optimistic ledger overlay — see use-lease-payments-store. Each entry
   // the operator marked-paid since the last server snapshot adds to the
@@ -698,10 +704,10 @@ function ActivePanel({
             <Download className="size-3.5" />
             {busy ? "Preparing…" : "Generate Invoice"}
           </Button>
-          <Button size="sm" onClick={() => setPaidOpen(true)} disabled={busy}>
+          {can("payments:write") && <Button size="sm" onClick={() => setPaidOpen(true)} disabled={busy}>
             <CheckCircle2 className="size-3.5" />
             Mark as Paid
-          </Button>
+          </Button>}
         </div>
       </div>
 

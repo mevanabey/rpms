@@ -17,14 +17,17 @@ Copy `.env.example` → `.env.local` (already done if you cloned with a populate
 
 ## 2. Auth providers
 
-Capital Trust users predominantly authenticate via Sri Lanka phone OTP. Configure in Dashboard → Authentication → Providers:
+Use email/password authentication for the provisioned staff accounts. Keep **Allow new users to sign up** disabled. Creating an Auth account alone does not grant RPMS access: it also needs an active `public.user_role` row. The app does not auto-provision unknown accounts.
 
-- **Phone** — enable. Supabase routes phone OTP through a Twilio account you supply:
-  - Twilio Account SID
-  - Twilio Auth Token
-  - Twilio Messaging Service SID (or sender phone number)
-- **Email** — enable as a fallback for staff who don't have a Sri Lanka mobile (handlers, accountants who use group email).
-- Optionally enable **Google** for the Capital Trust group workspaces.
+For a new staff account, create it through the Auth Admin API without a password (`email_confirm: true`), then insert an active `user_role` with `password_setup_required=true`, a primary `role`, and its full `roles` array. Staff select **Set your password** on `/login`; Supabase emails a single-use recovery link. After the verified link, `/auth/update-password` saves their chosen password and clears the setup gate. Existing users can select **Forgot password?**. Do not distribute shared or temporary passwords.
+
+Configure custom SMTP and the invite/recovery email templates to use:
+
+```html
+<a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=recovery">Set password</a>
+```
+
+Use `type=invite` for invitations. The callback verifies the token server-side and directs users to the password form. The deployed project uses the live RPMS origin as its Site URL; email links therefore lead to the live application. The email rate limit should accommodate staff onboarding (currently 60/hour). Passwords require at least 8 characters including uppercase, lowercase, number, and symbol.
 
 In Dashboard → Authentication → URL Configuration:
 - **Site URL**: `http://localhost:3000` for dev (and the deployed URL for prod).
@@ -42,4 +45,24 @@ The Drizzle schema and Supabase backend adapter are implemented. Set `DIRECT_URL
 
 ## 5. RLS
 
-Migration `0001` enables RLS on all application tables without browser-facing policies. RPMS reads and writes these tables through its server-only Drizzle connection; the browser Supabase client is used only for Auth. Lease pages and Server Actions check role and explicit `lease_party_role.user_id` assignments before returning data. Keep the database connection credentials server-only. Apply `0001` before deploying this version, then run `scripts/setup-scoped-staff.sql` in the Supabase SQL Editor. Assign the staff members to leases in **Team & contacts**; role assignment alone grants no lease access.
+Migration `0001` enables RLS on application tables without browser-facing policies; `0002` adds the same protection to the audit log. All business data uses server-only Drizzle. Only admins see all leases. Other staff see leases explicitly assigned to their account via `lease_party_role.user_id`, plus leases where `lease.created_by` matches their account. Role assignment alone grants no portfolio access. Advisors and accountants can create leases, including new contact/property/unit records needed for intake, and manage their visible leases. Lawyers are read-only unless they hold another role.
+
+Staff accounts may have multiple roles. Store all roles in `user_role.roles` and the primary role in `user_role.role`; when changing roles, update both. The permission union never grants portfolio access unless it includes `admin`. Assign active staff from **Team & contacts**. A contact without a system-user link grants no login or lease access.
+
+## 6. Manual email progression and audit history
+
+The lease progress panel supports both SMTP sends and **email sent manually** confirmations. A manual confirmation requires recipient addresses and a note. Lawyer/advisor confirmations advance to Advisor Approval only after both are recorded. The accounts confirmation also records advisor approval and advances to Accounts. Invalid stage skips are rejected; concurrent confirmations are serialised.
+
+`lease_audit` records the actor ID, name/email snapshot, timestamp, action, record type, before/after values, and event details. Database triggers cover leases, staff assignments, units, rent terms, ledger payments/reversals, obligations, documents, and edits to related contacts/properties. Server mutations run in one transaction with a verified actor via `withAudit`; actor context is transaction-local and isolated with AsyncLocalStorage. Direct database changes are recorded as `System/database`. Auth/dashboard operations outside RPMS cannot attribute their external operator to an app session.
+
+The audit log rejects UPDATE, DELETE, and TRUNCATE, and survives lease/account deletion. It appears on each lease, the dashboard, header activity menu, and `/activity`, with server-side lease scoping and pagination. New server mutations must use the secured backend or `withAudit`; never take an actor ID from client input.
+
+## 7. Verification
+
+Build the app, run it against a development Supabase project, then run:
+
+```sh
+node scripts/verify-staff-workflow.mjs http://localhost:3000
+```
+
+The checks create temporary Auth accounts and leases, exercise real server actions, and remove their business records afterward. They never send emails. Their audit history remains permanently, as required by the append-only policy. Use a development instance for these checks.

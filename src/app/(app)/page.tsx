@@ -1,3 +1,4 @@
+import { can, DEFAULT_PERMISSIONS } from "@/lib/demo/identity";
 import Link from "next/link";
 
 import {
@@ -23,10 +24,11 @@ import { formatCurrency } from "@/lib/utils";
 import { getBackend } from "@/server/container";
 import { requireAppUser } from "@/lib/auth/identity";
 import { scopeByLease } from "@/lib/demo/scope";
+import { recentLeaseAudit } from "@/server/audit";
+import { LeaseAuditHistory } from "@/components/app/lease-audit-history";
 
 import { RentBoard, type RentRow } from "./rent/_components/rent-board";
 
-const TODAY = "2026-05-05";
 const DUE_SOON_WINDOW_DAYS = 14;
 
 function emptyByCurrency(): Record<Currency, number> {
@@ -38,8 +40,10 @@ function formatLkrUsd(totals: Record<Currency, number>): string {
 }
 
 export default async function Home() {
+  const TODAY = new Date().toISOString().slice(0, 10);
   const user = await requireAppUser();
-  const canViewRent = ["admin", "account_manager", "accountant"].includes(user.role);
+  const activity = await recentLeaseAudit(6);
+  const canViewRent = can(user, DEFAULT_PERMISSIONS, "payments:read");
   const backend = getBackend();
   const [allLeases, allParties, allProperties, allLedger] = await Promise.all([
     backend.leases.list(),
@@ -150,7 +154,7 @@ export default async function Home() {
             Snapshot <span className="font-mono">{TODAY}</span>.
           </p>
         </div>
-        {(user.role === "admin" || user.role === "account_manager") && <Button asChild variant="outline" size="sm">
+        {(can(user, DEFAULT_PERMISSIONS, "leases:write")) && <Button asChild variant="outline" size="sm">
           <Link href="/leases/new">
             <Sparkles className="size-3.5" /> Onboard new tenant
           </Link>
@@ -182,6 +186,7 @@ export default async function Home() {
       {canViewRent && <div data-onborda="dashboard-leases">
         <RentBoard rows={rentRows} showHeader={false} showSummary={false} />
       </div>}
+      <Card><CardHeader><CardTitle>Recent lease activity</CardTitle><CardDescription>Recorded changes to leases you can access.</CardDescription></CardHeader><CardContent><LeaseAuditHistory entries={activity} showLease /><Button variant="link" asChild><Link href="/activity">View full activity log</Link></Button></CardContent></Card>
     </div>
   );
 }

@@ -563,7 +563,9 @@ This split is the seed for the matrix. The **gates** are the spots where Phase 0
 
 ## 19. Activity log & audit
 
-Every meaningful event flows through one shape and lands in one feed:
+Lease changes now persist in the append-only `lease_audit` table with actor ID/name/email, timestamp, action, source record, before/after values, and details. History survives deleted leases and staff accounts. Reads are restricted to visible leases; only admins see the full history. Manual email confirmations record recipients and a note and follow the same stage prerequisites as SMTP sends. See `docs/SUPABASE_SETUP.md` for the transaction and trigger design.
+
+The historical demo event shape below remains for deferred automation previews:
 
 ```
 Activity {
@@ -646,7 +648,7 @@ Writing new steps in `src/lib/tour/steps.tsx` is the standard way to grow the to
 
 ## 21. RBAC, identity, and user simulation
 
-> **Current staff access:** `admin` and `account_manager` retain portfolio access. `lawyer`, `accountant`, and `advisor` are limited to leases explicitly linked to their Supabase user ID. `viewer` has no application permissions.
+> **Current staff access (2026-10-04):** Only `admin` has portfolio access. Other staff see leases explicitly assigned to their Supabase user ID plus leases they created. Advisors and accountants can create and manage those leases; lawyers are read-only unless they also hold an editing role. Public signup is disabled; accounts are explicitly provisioned and choose their own password through a secure email link.
 
 The operator surface is a multi-role product. A handler shouldn't see admin tools, an introducer shouldn't see other introducers' commissions, an external auditor needs read-only across the portfolio. RBAC is built into the prototype from day one so every demo viewer can see *who can do what*.
 
@@ -667,7 +669,7 @@ The full matrix renders at `/admin/access` — every Resource × Role pair. In t
 
 ### 21.1a Staff lease scoping
 
-Lawyers, accountants, and advisors see only leases with a matching `lease_party_role.user_id`. The participant row also carries a `party_id` for agreement text and contact details. An external participant has a party row but no user ID, so they receive no app access. `assignedLeaseIds` is derived from the participant rows at sign-in; the old manually maintained array is no longer an authority. Server pages and actions check the assignment before returning data. Browser Data API access to public app tables is disabled by RLS without client policies; the server-only Drizzle connection remains the app's data access path.
+Non-admin staff see leases with a matching `lease_party_role.user_id` for one of their roles, plus leases with their ID in the immutable `lease.created_by` field. The participant row also carries a `party_id` for agreement text and contact details. An external participant has a party row but no user ID, so they receive no app access. `assignedLeaseIds` is derived from the participant rows at sign-in; the old manually maintained array is no longer an authority. Server pages and actions check the assignment before returning data. Browser Data API access to public app tables is disabled by RLS without client policies; the server-only Drizzle connection remains the app's data access path.
 
 ### 21.2 The Resource model
 

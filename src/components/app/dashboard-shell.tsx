@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { recentLeaseAudit } from "@/server/audit";
+
 import { cookies } from "next/headers";
 
 import { Separator } from "@/components/ui/separator";
@@ -13,7 +15,7 @@ import { TourLauncher } from "./tour-launcher";
 import { ThemeToggle } from "./theme-toggle";
 
 export async function DashboardShell({ children }: Readonly<{ children: ReactNode }>) {
-  const cookieStore = await cookies();
+  const [cookieStore, activity] = await Promise.all([cookies(), recentLeaseAudit()]);
   const defaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
 
   return (
@@ -45,7 +47,7 @@ export async function DashboardShell({ children }: Readonly<{ children: ReactNod
                 orientation="vertical"
                 className="data-[orientation=vertical]:h-4 data-[orientation=vertical]:self-center hidden sm:flex"
               />
-              <NotificationBell />
+              <NotificationBell entries={activity} />
               <TourLauncher />
               <ThemeToggle />
             </div>

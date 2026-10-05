@@ -3,7 +3,7 @@ import type { User } from "@supabase/supabase-js";
 import { isNotNull } from "drizzle-orm";
 
 import { requireResource } from "@/lib/auth/authorization";
-import { DEFAULT_ROLES } from "@/lib/demo/identity";
+import { DEFAULT_ROLES, rolesFor } from "@/lib/demo/identity";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { db } from "@/server/db/client";
 import { leasePartyRoleTable, userRole } from "@/server/db/schema";
@@ -44,7 +44,7 @@ export default async function UsersPage() {
       <Card>
         <CardHeader>
           <CardTitle>System users</CardTitle>
-          <CardDescription>External contacts live in Parties and have no login access. Staff lease access requires an explicit system-user assignment.</CardDescription>
+          <CardDescription>External contacts live in Parties and have no login access. Staff see leases assigned to them and leases they created. Only admins see all leases.</CardDescription>
         </CardHeader>
         <CardContent className="px-0">
           <Table>
@@ -57,10 +57,10 @@ export default async function UsersPage() {
                 const name = String(user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email!.split("@")[0]);
                 return <TableRow key={user.id}>
                   <TableCell><div className="font-medium">{name}</div><div className="text-xs text-muted-foreground">{user.email}</div></TableCell>
-                  <TableCell>{row ? labels.get(row.role) ?? row.role : "No RPMS role"}</TableCell>
+                  <TableCell>{row ? rolesFor(row).map((role) => labels.get(role) ?? role).join(" / ") : "No RPMS role"}</TableCell>
                   <TableCell>{row?.partyId ? <Link className="text-primary hover:underline" href={`/parties/${row.partyId}`}>View contact</Link> : "—"}</TableCell>
                   <TableCell>{leaseIdsByUser.get(user.id)?.size ?? 0}</TableCell>
-                  <TableCell><Badge variant="outline">{row?.isActive ? "Active" : "Inactive"}</Badge></TableCell>
+                  <TableCell><Badge variant="outline">{row?.isActive ? row.passwordSetupRequired ? "Password setup pending" : "Active" : "Inactive"}</Badge></TableCell>
                 </TableRow>;
               })}
             </TableBody>

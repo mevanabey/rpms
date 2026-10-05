@@ -1,3 +1,4 @@
+import { can, DEFAULT_PERMISSIONS, hasRole } from "@/lib/demo/identity";
 import Link from "next/link";
 
 import { Plus } from "lucide-react";
@@ -56,12 +57,12 @@ export default async function LeasesPage() {
         <div>
           <h1 className="font-bold text-2xl tracking-tight">Leases</h1>
           <p className="mt-1 text-muted-foreground text-sm">
-            {user.role === "admin" || user.role === "account_manager"
+            {hasRole(user, "admin")
               ? "Every lease — head and sub — with parties, schedule, and status."
-              : "Leases assigned to you."}
+              : "Leases assigned to you or created by you."}
           </p>
         </div>
-        {(user.role === "admin" || user.role === "account_manager") && <Button asChild>
+        {(can(user, DEFAULT_PERMISSIONS, "leases:write")) && <Button asChild>
           <Link href="/leases/new">
             <Plus className="size-4" />
             New lease
@@ -69,7 +70,7 @@ export default async function LeasesPage() {
         </Button>}
       </div>
 
-      {(user.role === "admin" || user.role === "account_manager") && <DraftLeasesCard />}
+      {(can(user, DEFAULT_PERMISSIONS, "leases:write")) && <DraftLeasesCard />}
 
       <div data-onborda="leases-table">
         <LeasesTable rows={rows} />

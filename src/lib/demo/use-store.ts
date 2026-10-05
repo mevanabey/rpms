@@ -4,7 +4,7 @@
  * Hooks that wrap `useDemoStore` with shallow comparison so callers don't
  * have to remember `useShallow` for every array/object selector.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { useShallow } from "zustand/react/shallow";
 
@@ -15,6 +15,8 @@ import {
 } from "./store";
 import {
   canAny as canAnyImpl,
+  can as canImpl,
+  DEFAULT_PERMISSIONS,
   PRESET_USERS,
   type AppUser,
   type Resource,
@@ -25,10 +27,9 @@ import { useAuthIdentity } from "@/lib/auth/identity-context";
 
 /** True once the persisted state has rehydrated client-side. */
 export function useDemoHydrated(): boolean {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
   const hydrated = useDemoStore((s) => s.hydrated);
   useEffect(() => {
-    setMounted(true);
     if (!useDemoStore.getState().hydrated) {
       void useDemoStore.persist.rehydrate();
     }
@@ -116,7 +117,7 @@ export function useVisibleActivities(): import("./types").Activity[] {
   const user = useCurrentUser();
   return useMemo(
     () => filterActivities(all, user),
-    [all, user?.id, user?.role],
+    [all, user],
   );
 }
 
@@ -146,7 +147,8 @@ export function useRoleDef(role: Role | null | undefined): RoleDefinition | unde
 }
 
 export function usePermissions(): Record<Role, Resource[]> {
-  return useDemoStore(useShallow((s) => s.permissions));
+  // Production permission rules must not depend on stale browser demo state.
+  return DEFAULT_PERMISSIONS;
 }
 
 /**
@@ -157,9 +159,7 @@ export function useCanCheck(): (resource: Resource) => boolean {
   const user = useCurrentUser();
   const permissions = usePermissions();
   return (resource) => {
-    if (!user) return false;
-    const list = permissions[user.role];
-    return list ? list.includes(resource) : false;
+    return canImpl(user, permissions, resource);
   };
 }
 
@@ -168,4 +168,3 @@ export function useCanAnyCheck(): (resources: Resource[]) => boolean {
   const permissions = usePermissions();
   return (resources) => canAnyImpl(user, permissions, resources);
 }
-

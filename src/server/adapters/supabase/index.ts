@@ -552,12 +552,21 @@ export const supabaseBackend: Backend = {
     },
 
     async markLeaseEmailSent(id, kind): Promise<Lease> {
+      // Serialise concurrent lawyer/advisor confirmations so neither loses
+      // the other's timestamp or leaves the workflow stuck at Send Emails.
+      await db.execute(sql`select id from lease where id = ${id} for update`);
       const [row] = await db
         .select()
         .from(leaseTable)
         .where(and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt)))
         .limit(1);
       if (!row) throw new Error(`Lease ${id} not found`);
+      if (row.status !== "draft") throw new Error("Email workflow steps apply to draft leases only.");
+      const sentAt = kind === "lawyer" ? row.lawyerEmailSentAt : kind === "advisor" ? row.advisorEmailSentAt : row.accountsEmailSentAt;
+      if (sentAt) return loadLease(id);
+      if (kind === "accounts" ? row.onboardingStage !== "emails_sent" : row.onboardingStage !== "agreement_ready") {
+        throw new Error(kind === "accounts" ? "Notify the lawyer and advisors before sending to accounts." : "Generate or upload the agreement before confirming emails.");
+      }
       const now = new Date();
       const set: Partial<typeof leaseTable.$inferInsert> = { updatedAt: now };
       const lawyerSet = kind === "lawyer" || Boolean(row.lawyerEmailSentAt);
@@ -587,7 +596,9 @@ export const supabaseBackend: Backend = {
     async setOnboardingStage(id, stage): Promise<Lease> {
       const [updated] = await db
         .update(leaseTable)
-        .set({ onboardingStage: stage, updatedAt: new Date() })
+        .set({ onboardingStage: stage, updatedAt: new Date(), ...(stage === null ? {
+          lawyerEmailSentAt: null, advisorEmailSentAt: null, accountsEmailSentAt: null,
+        } : {}) })
         .where(and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt)))
         .returning({ id: leaseTable.id });
       if (!updated) {
@@ -615,6 +626,7 @@ export const supabaseBackend: Backend = {
     },
 
     async generateRentSchedule(id): Promise<{ created: number; skipped: number }> {
+      await db.execute(sql`select id from lease where id = ${id} for update`);
       const [leaseRow] = await db
         .select()
         .from(leaseTable)
@@ -931,6 +943,10 @@ export const supabaseBackend: Backend = {
     },
 
     async markPaid(id: string, input: MarkPaidInput): Promise<LedgerEntry> {
+      await db.execute(sql`select id from ledger_entry where id = ${id} for update`);
+      const [current] = await db.select().from(ledgerEntryTable).where(eq(ledgerEntryTable.id, id)).limit(1);
+      if (!current) throw new Error("Ledger entry not found.");
+      if (current.paidDate) throw new Error("This rent entry is already paid. Reverse it before recording a correction.");
       const [updated] = await db
         .update(ledgerEntryTable)
         .set({
@@ -948,6 +964,7 @@ export const supabaseBackend: Backend = {
     },
 
     async markNextRentPaid(leaseId: string, input: MarkPaidInput): Promise<LedgerEntry> {
+      await db.execute(sql`select id from lease where id = ${leaseId} for update`);
       // Load lease (must exist + not deleted).
       const [leaseRow] = await db
         .select()
@@ -1058,7 +1075,7 @@ export const supabaseBackend: Backend = {
       return [];
     },
 
-    async enqueue(_input): Promise<Notification> {
+    async enqueue(): Promise<Notification> {
       throw new Error(
         "reminders.enqueue is not yet implemented — the notification table " +
           "isn't in the schema yet (SPEC §5). Send via Resend/Twilio directly " +

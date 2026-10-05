@@ -26,20 +26,26 @@ export interface AppUser {
   name: string;
   email: string;
   role: Role;
+  /** An account may perform more than one staff function. */
+  roles?: Role[];
   entities: string[];
   initials?: string;
   partyId?: string;
   /** Derived from explicit lease assignments for scoped staff roles. */
   assignedLeaseIds?: string[];
+  createdLeaseIds?: string[];
 }
 
 export type Resource =
   | "properties:read"
   | "properties:write"
+  | "properties:create"
   | "units:read"
   | "units:write"
+  | "units:create"
   | "parties:read"
   | "parties:write"
+  | "parties:create"
   | "leases:read"
   | "leases:write"
   | "leases:create"
@@ -71,10 +77,13 @@ export type Resource =
 export const ALL_RESOURCES: readonly Resource[] = [
   "properties:read",
   "properties:write",
+  "properties:create",
   "units:read",
   "units:write",
+  "units:create",
   "parties:read",
   "parties:write",
+  "parties:create",
   "leases:read",
   "leases:write",
   "leases:create",
@@ -121,9 +130,9 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
   { id: "admin", label: "Admin", description: "Full access — system, properties, leases, rent, and RBAC.", tone: ROLE_TONE_PRESETS[0].cls, builtin: true },
   { id: "account_manager", label: "Account Manager", description: "Day-to-day operator. Manages properties, leases, marks rent paid, and sends reminders.", tone: ROLE_TONE_PRESETS[1].cls, builtin: true },
   { id: "lawyer", label: "Lawyer", description: "Read-only access to leases where they are assigned as a lawyer.", tone: ROLE_TONE_PRESETS[3].cls, builtin: true },
-  { id: "accountant", label: "Accountant", description: "Rent and payments for assigned leases only.", tone: ROLE_TONE_PRESETS[2].cls, builtin: true },
-  { id: "advisor", label: "Advisor", description: "Read-only access to assigned leases and documents.", tone: ROLE_TONE_PRESETS[5].cls, builtin: true },
-  { id: "viewer", label: "Viewer", description: "Auto-provisioned default for new sign-ups. Admin must promote.", tone: ROLE_TONE_PRESETS[8].cls, builtin: true },
+  { id: "accountant", label: "Accountant", description: "Create and manage leases; rent and payments for assigned or self-created leases.", tone: ROLE_TONE_PRESETS[2].cls, builtin: true },
+  { id: "advisor", label: "Advisor", description: "Create and manage leases assigned to them or created by them.", tone: ROLE_TONE_PRESETS[5].cls, builtin: true },
+  { id: "viewer", label: "Viewer", description: "No app access until an administrator assigns a staff role.", tone: ROLE_TONE_PRESETS[8].cls, builtin: true },
 ];
 
 export const DEFAULT_PERMISSIONS: Record<Role, Resource[]> = {
@@ -131,10 +140,13 @@ export const DEFAULT_PERMISSIONS: Record<Role, Resource[]> = {
   account_manager: [
     "properties:read",
     "properties:write",
+    "properties:create",
     "units:read",
     "units:write",
+    "units:create",
     "parties:read",
     "parties:write",
+    "parties:create",
     "leases:read",
     "leases:write",
     "leases:create",
@@ -150,8 +162,8 @@ export const DEFAULT_PERMISSIONS: Record<Role, Resource[]> = {
     "admin:templates",
   ],
   lawyer: ["leases:read"],
-  accountant: ["leases:read", "payments:read", "payments:write"],
-  advisor: ["leases:read"],
+  accountant: ["leases:read", "leases:create", "leases:write", "properties:read", "properties:create", "units:read", "units:create", "parties:read", "parties:create", "documents:read", "documents:write", "payments:read", "payments:write"],
+  advisor: ["leases:read", "leases:create", "leases:write", "properties:read", "properties:create", "units:read", "units:create", "parties:read", "parties:create", "documents:read", "documents:write"],
   viewer: [],
 };
 
@@ -165,8 +177,7 @@ export function can(
   resource: Resource,
 ): boolean {
   if (!user) return false;
-  const list = permissions[user.role];
-  return list ? list.includes(resource) : false;
+  return rolesFor(user).some((role) => permissions[role]?.includes(resource));
 }
 
 export function canAny(
@@ -175,8 +186,15 @@ export function canAny(
   resources: Resource[],
 ): boolean {
   if (!user) return false;
-  const list = permissions[user.role];
-  return !!list && resources.some((r) => list.includes(r));
+  return resources.some((resource) => can(user, permissions, resource));
+}
+
+export function rolesFor(user: Pick<AppUser, "role" | "roles">): Role[] {
+  return [...new Set([user.role, ...(user.roles ?? [])])];
+}
+
+export function hasRole(user: AppUser, role: Role): boolean {
+  return rolesFor(user).includes(role);
 }
 
 export const PRESET_USERS: AppUser[] = [
@@ -223,7 +241,7 @@ export const PRESET_USERS: AppUser[] = [
 
 /** Resource grouping for the RBAC matrix + role editor. */
 export const RESOURCE_GROUPS: Array<{ label: string; resources: Resource[] }> = [
-  { label: "Estate", resources: ["properties:read", "properties:write", "units:read", "units:write", "parties:read", "parties:write"] },
+  { label: "Estate", resources: ["properties:read", "properties:create", "properties:write", "units:read", "units:create", "units:write", "parties:read", "parties:create", "parties:write"] },
   { label: "Agreements", resources: ["leases:read", "leases:write", "leases:create", "documents:read", "documents:write"] },
   { label: "Rent & money", resources: ["payments:read", "payments:write", "payments:reconcile", "reminders:read", "reminders:send"] },
   { label: "Reports", resources: ["reports:read"] },
