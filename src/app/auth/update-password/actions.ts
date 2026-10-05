@@ -16,7 +16,7 @@ export async function setPasswordAction(password: string, confirmation: string):
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   if (password !== confirmation) return { ok: false, error: "The passwords don’t match." };
   const access = await getAccountAccess();
-  if (!access?.row.isActive) return { ok: false, error: "Your session expired or your account is inactive. Request a new password link." };
+  if (!access?.row.isActive) return { ok: false, error: "Your session expired or your account is inactive. Return to sign in and request a new email code." };
   const supabase = await createClient();
   const { error } = await supabase.auth.updateUser({ password: parsed.data });
   if (error) return { ok: false, error: error.message };

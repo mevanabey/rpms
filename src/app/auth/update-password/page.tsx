@@ -10,9 +10,9 @@ export default async function UpdatePasswordPage() {
     <Card className="w-full max-w-sm">
       <CardHeader>
         <CardTitle>{access?.row.passwordSetupRequired ? "Set your first password" : "Reset your password"}</CardTitle>
-        <CardDescription>{access?.row.isActive ? `Choose a password for ${access.authUser.email}.` : "Open the password link from your email to continue."}</CardDescription>
+        <CardDescription>{access?.row.isActive ? `Choose a password for ${access.authUser.email}.` : "Return to sign in and verify your email code to continue."}</CardDescription>
       </CardHeader>
-      <CardContent>{access?.row.isActive ? <PasswordForm /> : <Button asChild><Link href="/login">Request a password link</Link></Button>}</CardContent>
+      <CardContent>{access?.row.isActive ? <PasswordForm /> : <Button asChild><Link href="/login">Return to sign in</Link></Button>}</CardContent>
     </Card>
   </main>;
 }
