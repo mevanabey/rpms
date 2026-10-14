@@ -14,11 +14,19 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const access = await getAccountAccess();
+  let access: Awaited<ReturnType<typeof getAccountAccess>> = null;
+  let unavailableError: string | undefined;
+  try {
+    access = await getAccountAccess();
+  } catch (error) {
+    console.error("RPMS sign-in session lookup failed", error);
+    unavailableError = "Sign-in is temporarily unavailable. Please try again shortly.";
+  }
   if (access?.row.isActive && !access.row.passwordSetupRequired) {
     redirect("/");
   }
   const { error } = await searchParams;
+  const message = unavailableError ?? error;
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background">
@@ -89,9 +97,9 @@ export default async function LoginPage({
               </p>
             </div>
 
-            {error && (
-              <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-destructive text-sm">
-                {error}
+            {message && (
+              <div role="alert" className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-destructive text-sm">
+                {message}
               </div>
             )}
 
