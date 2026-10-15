@@ -77,6 +77,7 @@ import type {
 import { useDemoStore } from "@/lib/demo/store";
 import { scopeByLease } from "@/lib/demo/scope";
 import {
+  useCanCheck,
   useCurrentUser,
   useRentReminders,
 } from "@/lib/demo/use-store";
@@ -223,6 +224,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
   const pending = submitting || refreshing;
   const [busyLeaseId, setBusyLeaseId] = useState<string | null>(null);
   const user = useCurrentUser();
+  const can = useCanCheck();
   const rentReminders = useRentReminders();
   const sendRentReminder = useDemoStore((s) => s.sendRentReminder);
 
@@ -581,9 +583,9 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
             <span className="text-muted-foreground">selected</span>
           </div>
           <Separator orientation="vertical" className="!h-4" />
-          <Button size="sm" variant="outline" onClick={handleBulkReminder}>
+          {can("reminders:send") && <Button size="sm" variant="outline" onClick={handleBulkReminder}>
             <Send className="size-3.5" /> Send reminder
-          </Button>
+          </Button>}
           <Button size="sm" variant="outline" onClick={handleBulkExport}>
             <ExternalLink className="size-3.5" /> Export CSV
           </Button>
@@ -689,7 +691,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="inline-flex gap-2">
-                        <Button
+                        {can("reminders:send") && <Button
                           size="sm"
                           variant="outline"
                           onClick={() => handleSendReminder(r)}
@@ -705,11 +707,11 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                           }
                         >
                           <Mail className="size-3.5" /> Send reminder
-                        </Button>
-                        <Button
+                        </Button>}
+                        {can("payments:write") && <Button
                           size="sm"
                           onClick={() => handleMarkPaid(r)}
-                          disabled={!entry || alreadyPaid}
+                          disabled={pending || !entry || alreadyPaid}
                           title={
                             !entry
                               ? "No rent line to mark"
@@ -719,7 +721,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                           }
                         >
                           <CheckCircle2 className="size-3.5" /> {pending && busyLeaseId === r.lease.id ? "Recording…" : "Mark paid"}
-                        </Button>
+                        </Button>}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button size="icon-sm" variant="ghost" aria-label="More actions">
@@ -736,13 +738,13 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                             >
                               <Eye className="size-3.5" /> Open lease
                             </DropdownMenuItem>
-                            <DropdownMenuItem
+                            {can("leases:write") && <DropdownMenuItem
                               onSelect={() =>
                                 router.push(`/leases/${r.lease.id}?edit=1`)
                               }
                             >
                               <Pencil className="size-3.5" /> Edit
-                            </DropdownMenuItem>
+                            </DropdownMenuItem>}
                             <DropdownMenuItem
                               disabled={pending}
                               onSelect={() => exportChecklist(r.lease.id)}
@@ -750,12 +752,12 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                               <FileSpreadsheet className="size-3.5" /> Export checklist
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem
+                            {can("leases:write") && <DropdownMenuItem
                               variant="destructive"
                               onSelect={() => setDeleteTarget(r)}
                             >
                               <Trash2 className="size-3.5" /> Delete
-                            </DropdownMenuItem>
+                            </DropdownMenuItem>}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>

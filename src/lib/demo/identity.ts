@@ -1,11 +1,8 @@
 /**
- * RBAC primitives. Roles + permissions are runtime-editable from
- * /admin/access (admin only) — the *defaults* live here as the seed for the
- * demo store. Components read live values via the hooks in `use-store.ts`.
- *
- * Phase 02 keeps the same `Role` / `Resource` / `RoleDefinition` shapes —
- * the difference is the source of truth (Postgres) and the enforcement
- * layer (RLS + tRPC procedures).
+ * Effective production RBAC rules. Server authorization, client guards,
+ * navigation, and the read-only /admin/access matrix share this map.
+ * Account role assignments live in Postgres; old demo permission overrides
+ * never grant production access.
  */
 
 export type Role = string;
@@ -67,6 +64,7 @@ export type Resource =
   | "automation:read"
   | "automation:promote"
   | "reports:read"
+  | "checklists:manage"
   | "admin:import"
   | "admin:templates"
   | "admin:workflows"
@@ -105,6 +103,7 @@ export const ALL_RESOURCES: readonly Resource[] = [
   "automation:read",
   "automation:promote",
   "reports:read",
+  "checklists:manage",
   "admin:import",
   "admin:templates",
   "admin:workflows",
@@ -129,10 +128,10 @@ export const ROLE_TONE_PRESETS: Array<{ id: string; label: string; cls: string }
 export const DEFAULT_ROLES: RoleDefinition[] = [
   { id: "admin", label: "Admin", description: "Full access — system, properties, leases, rent, and RBAC.", tone: ROLE_TONE_PRESETS[0].cls, builtin: true },
   { id: "account_manager", label: "Account Manager", description: "Day-to-day operator. Manages properties, leases, marks rent paid, and sends reminders.", tone: ROLE_TONE_PRESETS[1].cls, builtin: true },
-  { id: "lawyer", label: "Lawyer", description: "Read-only access to leases where they are assigned as a lawyer.", tone: ROLE_TONE_PRESETS[3].cls, builtin: true },
+  { id: "lawyer", label: "Lawyer", description: "Upload checklists and create, edit, and delete leases assigned to them or created by them.", tone: ROLE_TONE_PRESETS[3].cls, builtin: true },
   { id: "accountant", label: "Accountant", description: "Create and manage leases; rent and payments for assigned or self-created leases.", tone: ROLE_TONE_PRESETS[2].cls, builtin: true },
   { id: "advisor", label: "Advisor", description: "Create and manage leases assigned to them or created by them.", tone: ROLE_TONE_PRESETS[5].cls, builtin: true },
-  { id: "viewer", label: "Viewer", description: "No app access until an administrator assigns a staff role.", tone: ROLE_TONE_PRESETS[8].cls, builtin: true },
+  { id: "viewer", label: "Viewer", description: "No staff permissions. An administrator must assign a staff role to grant module access.", tone: ROLE_TONE_PRESETS[8].cls, builtin: true },
 ];
 
 export const DEFAULT_PERMISSIONS: Record<Role, Resource[]> = {
@@ -161,7 +160,7 @@ export const DEFAULT_PERMISSIONS: Record<Role, Resource[]> = {
     // Account managers own lease document templates day-to-day.
     "admin:templates",
   ],
-  lawyer: ["leases:read"],
+  lawyer: ["checklists:manage", "leases:read", "leases:create", "leases:write", "properties:read", "properties:create", "units:read", "units:create", "parties:read", "parties:create", "documents:read", "documents:write"],
   accountant: ["leases:read", "leases:create", "leases:write", "properties:read", "properties:create", "units:read", "units:create", "parties:read", "parties:create", "documents:read", "documents:write", "payments:read", "payments:write"],
   advisor: ["leases:read", "leases:create", "leases:write", "properties:read", "properties:create", "units:read", "units:create", "parties:read", "parties:create", "documents:read", "documents:write"],
   viewer: [],
@@ -243,7 +242,13 @@ export const PRESET_USERS: AppUser[] = [
 export const RESOURCE_GROUPS: Array<{ label: string; resources: Resource[] }> = [
   { label: "Estate", resources: ["properties:read", "properties:create", "properties:write", "units:read", "units:create", "units:write", "parties:read", "parties:create", "parties:write"] },
   { label: "Agreements", resources: ["leases:read", "leases:write", "leases:create", "documents:read", "documents:write"] },
+  { label: "Checklists", resources: ["checklists:manage"] },
   { label: "Rent & money", resources: ["payments:read", "payments:write", "payments:reconcile", "reminders:read", "reminders:send"] },
+  { label: "Commissions", resources: ["commissions:read", "commissions:payout"] },
+  { label: "Maintenance", resources: ["maintenance:read", "maintenance:write"] },
+  { label: "Compliance", resources: ["compliance:read", "compliance:write"] },
+  { label: "Tasks", resources: ["tasks:read", "tasks:decide"] },
+  { label: "Automation", resources: ["automation:read", "automation:promote"] },
   { label: "Reports", resources: ["reports:read"] },
   { label: "Admin", resources: ["admin:import", "admin:templates", "admin:workflows", "admin:users", "admin:rbac", "admin:reset-demo"] },
 ];

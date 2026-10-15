@@ -225,7 +225,7 @@ export default function ChecklistUploadPage() {
     files.every((r) => r.status.kind === "done" || r.status.kind === "error");
 
   return (
-    <RoleGate required={["admin:import"]}>
+    <RoleGate required={["checklists:manage"]}>
       <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
         <div>
           <h1 className="font-bold text-2xl tracking-tight">Checklist upload</h1>
@@ -239,6 +239,10 @@ export default function ChecklistUploadPage() {
             <code className="font-mono text-xs">.xls</code>,{" "}
             <code className="font-mono text-xs">.ods</code> and{" "}
             <code className="font-mono text-xs">.csv</code>.
+          </p>
+          <p className="mt-2 text-muted-foreground text-sm">
+            Open an imported lease to edit its checklist details or delete it.
+            Your imports also appear in Leases after you leave this page.
           </p>
         </div>
 

@@ -557,10 +557,20 @@ export async function updateLeaseTrancheAction(
 export async function updatePartyAction(
   id: string,
   patch: PartyUpdateInput,
+  leaseId?: string,
 ): Promise<ActionResult<Party>> {
   try {
-    await authorizeWrite("parties:write");
     z.string().uuid().parse(id);
+    const user = await requireAppUser();
+    if (!userCan(user, "parties:write")) {
+      if (!leaseId) throw new Error("Access denied: editing this contact requires an editable lease.");
+      z.string().uuid().parse(leaseId);
+      await requireLeaseAccess(leaseId, "leases:write");
+      const lease = await getBackend().leases.get(leaseId);
+      if (!lease || ![lease.lessorPartyId, lease.lesseePartyId, ...(lease.additionalRoles ?? []).map((role) => role.partyId)].includes(id)) {
+        throw new Error("Access denied: this contact is not attached to the lease.");
+      }
+    }
     const parsed = partyUpdateSchema.parse(patch);
     const data = await getBackend().parties.update(id, parsed as PartyUpdateInput);
     revalidateAll();
@@ -574,10 +584,18 @@ export async function updatePartyAction(
 export async function updatePropertyAction(
   id: string,
   patch: PropertyUpdateInput,
+  leaseId?: string,
 ): Promise<ActionResult<Property>> {
   try {
-    await authorizeWrite("properties:write");
     z.string().uuid().parse(id);
+    const user = await requireAppUser();
+    if (!userCan(user, "properties:write")) {
+      if (!leaseId) throw new Error("Access denied: editing this property requires an editable lease.");
+      z.string().uuid().parse(leaseId);
+      await requireLeaseAccess(leaseId, "leases:write");
+      const lease = await getBackend().leases.get(leaseId);
+      if (!lease || lease.propertyId !== id) throw new Error("Access denied: this property is not attached to the lease.");
+    }
     const parsed = propertyUpdateSchema.parse(patch);
     const data = await getBackend().properties.updateProperty(
       id,

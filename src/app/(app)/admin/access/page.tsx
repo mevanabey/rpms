@@ -1,266 +1,91 @@
-"use client";
+import { Check, ShieldCheck, X } from "lucide-react";
+import { eq } from "drizzle-orm";
 
-import { useState } from "react";
-
-import {
-  Check,
-  Pencil,
-  Plus,
-  RotateCcw,
-  ShieldAlert,
-  ShieldCheck,
-  Trash2,
-  X,
-} from "lucide-react";
-import { toast } from "sonner";
-
-import { RoleGate } from "@/components/app/role-gate";
-import { RoleFormDialog } from "@/components/app/role-form-dialog";
-import { RolePill } from "@/components/app/role-pill";
+import { requireResource } from "@/lib/auth/authorization";
+import { ALL_RESOURCES, DEFAULT_PERMISSIONS, DEFAULT_ROLES, RESOURCE_GROUPS, rolesFor, type Resource } from "@/lib/demo/identity";
+import { db } from "@/server/db/client";
+import { userRole } from "@/server/db/schema";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { useDemoStore } from "@/lib/demo/store";
-import {
-  ALL_RESOURCES,
-  PRESET_USERS,
-  RESOURCE_GROUPS,
-  type Resource,
-  type Role,
-  type RoleDefinition,
-} from "@/lib/demo/identity";
-import { usePermissions, useRoleDefs } from "@/lib/demo/use-store";
-import { cn } from "@/lib/utils";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-export default function RbacPage() {
-  return (
-    <RoleGate required={["admin:rbac"]}>
-      <RbacPageInner />
-    </RoleGate>
-  );
-}
+const permissionLabels: Record<Resource, string> = {
+  "properties:read": "View properties", "properties:create": "Add properties", "properties:write": "Edit properties independently",
+  "units:read": "View units", "units:create": "Add units", "units:write": "Edit units",
+  "parties:read": "View contacts", "parties:create": "Add contacts", "parties:write": "Edit contacts independently",
+  "leases:read": "View visible leases", "leases:create": "Add leases", "leases:write": "Edit and delete visible leases",
+  "documents:read": "View lease documents", "documents:write": "Create and update lease documents",
+  "checklists:manage": "Upload and import checklists",
+  "payments:read": "View rent and payments", "payments:write": "Mark and reverse rent payments", "payments:reconcile": "Reconcile payments",
+  "reminders:read": "View reminders", "reminders:send": "Send reminders",
+  "commissions:read": "View commissions", "commissions:payout": "Pay commissions",
+  "maintenance:read": "View maintenance", "maintenance:write": "Manage maintenance",
+  "compliance:read": "View compliance", "compliance:write": "Manage compliance",
+  "tasks:read": "View tasks", "tasks:decide": "Decide tasks",
+  "automation:read": "View automation", "automation:promote": "Manage automation",
+  "reports:read": "View reports",
+  "admin:import": "Import legacy workbooks", "admin:templates": "Manage templates", "admin:workflows": "Manage workflow settings",
+  "admin:users": "Manage users", "admin:rbac": "View the permissions matrix", "admin:reset-demo": "Manage demo data",
+};
 
-function RbacPageInner() {
-  const roleDefs = useRoleDefs();
-  const permissions = usePermissions();
-  const setPermission = useDemoStore((s) => s.setPermission);
-  const deleteRoleDef = useDemoStore((s) => s.deleteRoleDef);
-  const resetRolePermissions = useDemoStore((s) => s.resetRolePermissions);
-  const resetAllRbac = useDemoStore((s) => s.resetAllRbac);
-  const [editing, setEditing] = useState<RoleDefinition | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
+/** Display the same effective rules used by server authorization and navigation. */
+export default async function RbacPage() {
+  await requireResource("admin:rbac");
+  const accounts = await db.select({ role: userRole.role, roles: userRole.roles })
+    .from(userRole).where(eq(userRole.isActive, true));
 
-  const userCount = (role: Role) => PRESET_USERS.filter((u) => u.role === role).length;
-  const allowedCount = (role: Role) => permissions[role]?.length ?? 0;
-  const totalResources = ALL_RESOURCES.length;
-
-  const handleDelete = (role: RoleDefinition) => {
-    const inUse = userCount(role.id);
-    if (inUse > 0) {
-      toast.error(`Can't delete · ${inUse} user${inUse === 1 ? "" : "s"} still assigned to this role`);
-      return;
-    }
-    const result = deleteRoleDef(role.id);
-    if (!result.ok) {
-      toast.error(result.reason ?? "Couldn't delete role");
-      return;
-    }
-    toast.success(`Role "${role.label}" deleted`);
-  };
-
-  return (
-    <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
-      <div data-onborda="page-title">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="flex items-center gap-2 font-bold text-2xl tracking-tight">
-              <ShieldAlert className="size-6" />
-              Access
-            </h1>
-            <p className="mt-1 max-w-3xl text-muted-foreground text-sm">
-              Roles and permissions. The matrix below is the single source of
-              truth — sidebar items, page guards, and action buttons all read
-              from it. Click any cell to grant or revoke.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => {
-              resetAllRbac();
-              toast.success("All roles + permissions reset to defaults");
-            }}>
-              <RotateCcw className="size-3.5" /> Reset all
-            </Button>
-            <RoleFormDialog
-              open={showAdd}
-              onOpenChange={setShowAdd}
-              trigger={
-                <Button size="sm">
-                  <Plus className="size-4" /> New role
-                </Button>
-              }
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-7">
-        {roleDefs.map((r) => (
-          <Card key={r.id}>
-            <CardHeader>
-              <CardDescription className="text-[11px] uppercase tracking-wider">
-                <RolePill role={r.id} size="sm" />
-              </CardDescription>
-              <CardTitle className="text-2xl tabular-nums">
-                {allowedCount(r.id)}
-                <span className="ml-1 font-normal text-muted-foreground text-xs">
-                  of {totalResources}
-                </span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex items-center justify-between gap-2">
-              <div className="text-muted-foreground text-xs">
-                {userCount(r.id)} user{userCount(r.id) === 1 ? "" : "s"}
-                {!r.builtin && (
-                  <Badge variant="outline" className="ml-1 text-[10px]">
-                    custom
-                  </Badge>
-                )}
-              </div>
-              <div className="flex items-center gap-0.5">
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={() => setEditing(r)}
-                  aria-label={`Edit ${r.label}`}
-                >
-                  <Pencil className="size-3.5" />
-                </Button>
-                {!r.builtin && (
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={() => handleDelete(r)}
-                    aria-label={`Delete ${r.label}`}
-                    className="text-rose-600 hover:text-rose-700 dark:text-rose-300"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {editing && (
-        <RoleFormDialog
-          editing={editing}
-          open={!!editing}
-          onOpenChange={(o) => !o && setEditing(null)}
-          trigger={<span />}
-        />
-      )}
-
-      {RESOURCE_GROUPS.map((g) => (
-        <Card key={g.label}>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ShieldCheck className="size-4" /> {g.label}
-            </CardTitle>
-            <CardDescription>
-              {g.resources.length} resource{g.resources.length === 1 ? "" : "s"} · click cells to toggle.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="px-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="min-w-[220px] sticky left-0 bg-background">Resource</TableHead>
-                  {roleDefs.map((r) => (
-                    <TableHead key={r.id} className="text-center">
-                      <RolePill role={r.id} size="sm" />
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {g.resources.map((res) => (
-                  <TableRow key={res}>
-                    <TableCell className="sticky left-0 bg-background font-mono text-xs">
-                      {res}
-                    </TableCell>
-                    {roleDefs.map((r) => {
-                      const on = (permissions[r.id] ?? []).includes(res);
-                      return (
-                        <TableCell key={r.id} className="p-1 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setPermission(r.id, res as Resource, !on)}
-                            aria-label={`Toggle ${res} for ${r.label}`}
-                            className={cn(
-                              "inline-flex size-7 items-center justify-center rounded-md border transition-colors",
-                              on
-                                ? "border-emerald-300 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                                : "border-border bg-muted/30 text-muted-foreground hover:bg-muted",
-                            )}
-                          >
-                            {on ? <Check className="size-4" /> : <X className="size-3" />}
-                          </button>
-                        </TableCell>
-                      );
-                    })}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ))}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Per-role tools</CardTitle>
-          <CardDescription>
-            Reset a role’s permissions to the built-in default — useful after
-            experimenting with toggles.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2">
-          {roleDefs.map((r) => (
-            <div key={r.id} className="flex items-center justify-between rounded-md border p-3">
-              <div>
-                <RolePill role={r.id} />
-                <p className="mt-1 text-muted-foreground text-xs">{r.description}</p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!r.builtin}
-                onClick={() => {
-                  resetRolePermissions(r.id);
-                  toast.success(`${r.label} permissions reset to default`);
-                }}
-              >
-                <RotateCcw className="size-3.5" /> Reset
-              </Button>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+  return <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
+    <div>
+      <h1 className="flex items-center gap-2 font-bold text-2xl tracking-tight">
+        <ShieldCheck className="size-6" /> Roles and permissions
+      </h1>
+      <p className="mt-1 max-w-3xl text-muted-foreground text-sm">
+        Current access rules for every role. This matrix is read-only and matches
+        the permissions enforced by the server.
+      </p>
+      <p className="mt-2 max-w-3xl text-muted-foreground text-sm">
+        Only admins can see every lease. Other staff see leases assigned to them
+        or created by them. Multiple roles combine their permissions.
+        Lease editing includes deletion; rent payments require their own permission.
+        Checklist management includes upload and import; the resulting records are managed in Leases.
+        Lease editors can also correct linked contacts and property details from that lease.
+      </p>
     </div>
-  );
+
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      {DEFAULT_ROLES.map((role) => <Card key={role.id}>
+        <CardHeader>
+          <CardTitle className="text-base"><Badge variant="outline" className={role.tone}>{role.label}</Badge></CardTitle>
+          <CardDescription>{role.description}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-1 text-sm">
+          <p>{DEFAULT_PERMISSIONS[role.id]?.length ?? 0} of {ALL_RESOURCES.length} permissions</p>
+          <p className="text-muted-foreground">{accounts.filter((account) => rolesFor(account).includes(role.id)).length} active accounts</p>
+        </CardContent>
+      </Card>)}
+    </div>
+
+    {RESOURCE_GROUPS.map((group) => <Card key={group.label}>
+      <CardHeader><CardTitle className="text-base">{group.label}</CardTitle></CardHeader>
+      <CardContent className="px-0">
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead className="sticky left-0 min-w-[220px] bg-background">Permission</TableHead>
+            {DEFAULT_ROLES.map((role) => <TableHead key={role.id} className="text-center">{role.label}</TableHead>)}
+          </TableRow></TableHeader>
+          <TableBody>{group.resources.map((resource) => <TableRow key={resource}>
+            <TableCell className="sticky left-0 bg-background text-sm" data-permission={resource}>{permissionLabels[resource]}</TableCell>
+            {DEFAULT_ROLES.map((role) => {
+              const allowed = DEFAULT_PERMISSIONS[role.id]?.includes(resource) ?? false;
+              return <TableCell key={role.id} className="text-center" aria-label={`${role.label}: ${allowed ? "Allowed" : "Not granted"}`}>
+                {allowed
+                  ? <Check className="mx-auto size-4 text-emerald-600" aria-hidden />
+                  : <X className="mx-auto size-4 text-muted-foreground" aria-hidden />}
+              </TableCell>;
+            })}
+          </TableRow>)}</TableBody>
+        </Table>
+      </CardContent>
+    </Card>)}
+  </div>;
 }

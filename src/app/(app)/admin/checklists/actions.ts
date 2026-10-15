@@ -11,6 +11,8 @@ import type { ScheduleBlock } from "@/lib/checklist/parse";
 import type { ChecklistImportResult } from "@/lib/checklist/result";
 import { getBackend } from "@/server/container";
 import { requireResource } from "@/lib/auth/authorization";
+import { withAudit } from "@/server/db/client";
+import type { AppUser } from "@/lib/demo/identity";
 
 export interface ChecklistInput {
   fields: ChecklistFields;
@@ -24,8 +26,8 @@ export interface ChecklistInput {
  * revalidate the affected routes.
  */
 export async function importChecklist(input: ChecklistInput): Promise<ChecklistImportResult> {
-  await requireResource("admin:import");
-  const result = await importOne(input);
+  const actor = await requireResource("checklists:manage");
+  const result = await importOne(input, actor);
   await revalidateBackend();
   return result;
 }
@@ -37,11 +39,11 @@ export async function importChecklist(input: ChecklistInput): Promise<ChecklistI
 export async function importChecklistBatch(inputs: ChecklistInput[]): Promise<{
   results: Array<{ ok: true; data: ChecklistImportResult } | { ok: false; error: string }>;
 }> {
-  await requireResource("admin:import");
+  const actor = await requireResource("checklists:manage");
   const results: Array<{ ok: true; data: ChecklistImportResult } | { ok: false; error: string }> = [];
   for (const input of inputs) {
     try {
-      results.push({ ok: true, data: await importOne(input) });
+      results.push({ ok: true, data: await importOne(input, actor) });
     } catch (err) {
       results.push({ ok: false, error: err instanceof Error ? err.message : "Import failed" });
     }
@@ -50,7 +52,7 @@ export async function importChecklistBatch(inputs: ChecklistInput[]): Promise<{
   return { results };
 }
 
-async function importOne(input: ChecklistInput): Promise<ChecklistImportResult> {
+async function importOne(input: ChecklistInput, actor: AppUser): Promise<ChecklistImportResult> {
   // `ChecklistFields` has optional keys; the raw extractor types `fields` as
   // `Record<string, string>`. Strip `undefined`s before forwarding so the
   // widened shape lines up.
@@ -63,7 +65,9 @@ async function importOne(input: ChecklistInput): Promise<ChecklistImportResult> 
     unknown: input.unknown ?? [],
     schedules: input.schedules ?? [],
   });
-  return importChecklistToBackend(getBackend(), intake);
+  return withAudit(actor, "Checklist imported", () => importChecklistToBackend(getBackend(), intake), {
+    source: "checklist-upload",
+  });
 }
 
 async function revalidateBackend() {

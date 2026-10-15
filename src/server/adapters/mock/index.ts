@@ -95,6 +95,7 @@ export const mockBackend: Backend = {
         stampDuty: intent.stampDuty,
         legalFees: intent.legalFees,
         clauses: intent.clauses,
+        importMeta: intent.importMeta,
         additionalRoles: intent.additionalRoles,
         tranches: intent.tranches.map((t) => ({ ...t, id: mockId("tr") })),
       };

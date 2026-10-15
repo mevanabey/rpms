@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { requireResource } from "@/lib/auth/authorization";
+import { requireAnyResource } from "@/lib/auth/authorization";
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
-  await requireResource("admin:templates");
+  await requireAnyResource(["admin:templates", "checklists:manage"]);
   return children;
 }

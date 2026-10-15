@@ -51,6 +51,8 @@ export interface LeaseCreateIntent {
   tranches: Array<Omit<RentScheduleTranche, "id">>;
   /** Optional legal_entity code (e.g. "CTH"). Falls back to the default. */
   legalEntityCode?: string;
+  /** Server-supplied provenance; public lease actions reject this field. */
+  importMeta?: Record<string, unknown>;
 }
 
 /**

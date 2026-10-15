@@ -262,12 +262,12 @@ async function persist(
     case "party": {
       const patch: PartyUpdateInput = {};
       Object.assign(patch, { [save.field]: patchValue(value) });
-      return updatePartyAction(save.partyId, patch);
+      return updatePartyAction(save.partyId, patch, leaseId);
     }
     case "property": {
       const patch: PropertyUpdateInput = {};
       Object.assign(patch, { [save.field]: patchValue(value) });
-      return updatePropertyAction(save.propertyId, patch);
+      return updatePropertyAction(save.propertyId, patch, leaseId);
     }
     case "tranche": {
       if (value.of !== "money" || value.value === null) {

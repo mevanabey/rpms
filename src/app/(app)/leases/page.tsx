@@ -62,7 +62,7 @@ export default async function LeasesPage() {
               : "Leases assigned to you or created by you."}
           </p>
         </div>
-        {(can(user, DEFAULT_PERMISSIONS, "leases:write")) && <Button asChild>
+        {(can(user, DEFAULT_PERMISSIONS, "leases:create")) && <Button asChild>
           <Link href="/leases/new">
             <Plus className="size-4" />
             New lease

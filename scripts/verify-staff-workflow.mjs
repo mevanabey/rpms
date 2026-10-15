@@ -44,9 +44,10 @@ async function action(user, name, args, route = '/leases/new', render = false) {
   // page is fetched separately below, with normal browser-facing responses.
   const response = await fetch(origin + route, { method:'POST', headers:{Cookie:cookies(user),Origin:origin,'Next-Action':id,...(render ? {'Next-Router-State-Tree':encodeURIComponent(JSON.stringify(['',{children:['(app)',{children:['leases',{children:[['id',route.split('/').at(-1),'d',null],{children:['__PAGE__',{}]}]}]}]}]))} : {'x-action-forwarded':'1'}),Accept:'text/x-component',...(typeof body === 'string' ? {'Content-Type':'text/plain;charset=UTF-8'}:{})}, body, redirect:'manual',signal:AbortSignal.timeout(60000) });
   const content = await response.text();
-  const resultLine = content.split('\n').find(line=>/^\d+:\{"ok":/.test(line));
+  const resultLine = content.split('\n').find(line=>/^\d+:\{"(?:ok|results)":/.test(line));
+  if (!resultLine && content.split('\n').some(line=>/^\d+:E\{/.test(line))) return {ok:false,serverError:true};
   if (!resultLine) throw new Error(`${name}: HTTP ${response.status}; missing action result. ${content.slice(0,300)}`);
-  return JSON.parse(resultLine.slice(resultLine.indexOf(':')+1));
+  return JSON.parse(resultLine.slice(resultLine.indexOf(':')+1),(_key,value)=>value==='$undefined'?undefined:value);
 }
 async function good(user, name, args, route) { const result=await action(user,name,args,route); assert.equal(result.ok,true, `${name}: ${result.error}`); return result.data; }
 async function page(user, route) {
@@ -116,7 +117,9 @@ try {
   check('Dual-role user can see advisor assignment with lawyer primary role',!(await page(dual,'/leases/'+b.id)).error);
   const wrongRead=await action(outsider,'getLeaseAgreementUrlAction',[a.id],'/leases/'+a.id);check('Unassigned document download is denied',!wrongRead.ok);
   const wrongEdit=await action(outsider,'updateLeaseAction',[a.id,{occupancyCap:999}],'/leases/'+a.id);check('Unassigned lease editing is denied',!wrongEdit.ok);
-  const lawyerEdit=await action(lawyer,'updateLeaseAction',[a.id,{occupancyCap:999}],'/leases/'+a.id);check('Read-only lawyer cannot edit leases',!lawyerEdit.ok);
+  const lawyerEdit=await action(lawyer,'updateLeaseAction',[a.id,{advanceMonths:1}],'/leases/'+a.id);check('Lawyer can edit a lease assigned to them',lawyerEdit.ok&&lawyerEdit.data.advanceMonths===1);
+  const lawyerWrongEdit=await action(lawyer,'updateLeaseAction',[c.id,{occupancyCap:999}],'/leases/'+c.id);check('Lawyer cannot edit an unassigned lease',!lawyerWrongEdit.ok);
+  const lawyerWrongDelete=await action(lawyer,'deleteLeaseAction',[c.id],'/leases/'+c.id);check('Lawyer cannot delete an unassigned lease',!lawyerWrongDelete.ok);
   const early=await action(advisor,'markLeaseEmailManuallySentAction',[a.id,{kind:'accounts',recipients:['test@example.invalid'],note:'QA early confirmation'}],'/leases/'+a.id);check('Manual email cannot skip prerequisites',!early.ok);
   await Promise.all([good(advisor,'updateLeaseAction',[a.id,{occupancyCap:3}],'/leases/'+a.id),good(accountant,'updateLeaseAction',[b.id,{occupancyCap:4}],'/leases/'+b.id)]);
   const concurrentActors=await sql`select lease_id,actor_id from lease_audit where action='Lease edited' and ((lease_id=${a.id} and ("after"->>'occupancy_cap')='3') or (lease_id=${b.id} and ("after"->>'occupancy_cap')='4'))`;check('Concurrent mutations keep actors isolated',concurrentActors.every(row=>row.actor_id===(row.lease_id===a.id?advisor.id:accountant.id))&&concurrentActors.length===2);
@@ -131,6 +134,7 @@ try {
   const duplicate=await action(accountant,'markRentPaidAction',[paid.id,{paidDate:'2026-10-04',paymentMethod:'lkr_transfer'}],'/rent');check('Duplicate payment marking is rejected',!duplicate.ok);
   await good(accountant,'unmarkRentPaidAction',[paid.id],'/rent');
   const advisorPaid=await action(advisor,'markNextRentPaidAction',[a.id,{paidDate:'2026-10-04',paymentMethod:'lkr_transfer'}],'/leases/'+a.id);check('Advisor cannot mark rent paid',!advisorPaid.ok);
+  const lawyerPaid=await action(lawyer,'markNextRentPaidAction',[a.id,{paidDate:'2026-10-04',paymentMethod:'lkr_transfer'}],'/leases/'+a.id);check('Lawyer cannot mark rent paid',!lawyerPaid.ok);
   const audit=await sql`select * from lease_audit where lease_id=${a.id} order by created_at`;
   check('Creation, edit, upload, progression, and payment actors are recorded',audit.some(x=>x.action==='Lease created'&&x.actor_id===advisor.id)&&audit.some(x=>x.action==='Lease edited'&&x.actor_id===advisor.id)&&audit.some(x=>x.action==='Lease agreement uploaded'&&x.actor_id===advisor.id)&&audit.some(x=>x.action==='Email marked sent manually'&&x.details.method==='manual'&&x.details.recipients.length)&&audit.some(x=>x.action==='Rent marked paid'&&x.actor_id===accountant.id)&&audit.some(x=>x.action==='Rent payment reversed'&&x.actor_id===accountant.id));
   check('Audit retains before/after field values',audit.some(x=>x.action==='Lease edited'&&x.before?.occupancy_cap===null&&x.after?.occupancy_cap===3));
@@ -145,6 +149,51 @@ try {
   const revokedList=await page(lawyer,'/leases');check('Removing an assignment revokes list visibility',!revokedList.body.includes(a.id));
   const creatorList=await page(advisor,'/leases');check('Creator access survives team reassignment',creatorList.body.includes(a.id));
   const renderedAction=await action(advisor,'updateLeaseAction',[a.id,{occupancyCap:5}],'/leases/'+a.id,true);check('Browser-style action completes with refreshed page payload',renderedAction.ok);
+  const lawyerUploadPage=await page(lawyer,'/admin/checklists');check('Lawyer can open checklist upload through the admin layout',lawyerUploadPage.response.status===200&&!lawyerUploadPage.error&&lawyerUploadPage.body.includes('Checklist upload'));
+  for(const path of ['/admin/access','/admin/users','/admin/templates','/admin/import','/admin/workflows','/admin/demo','/tasks','/automation','/rent','/payments','/payments/inbox','/reports/rent-roll']){
+    const denied=await page(lawyer,path);check(`Lawyer cannot open ${path}`,denied.response.status!==200||denied.error);
+  }
+  const matrix=await page(owner,'/admin/access');check('Admin sees the effective read-only permission matrix',matrix.response.status===200&&!matrix.error&&matrix.body.includes('read-only')&&matrix.body.includes('checklists:manage')&&matrix.body.includes('commissions:payout'));
+  const ts=require('typescript');const rulesSource=readFileSync('src/lib/demo/identity.ts','utf8');const rulesJS=ts.transpileModule(rulesSource,{compilerOptions:{module:ts.ModuleKind.ESNext}}).outputText;const rules=await import('data:text/javascript;base64,'+Buffer.from(rulesJS).toString('base64'));
+  const grouped=rules.RESOURCE_GROUPS.flatMap(group=>group.resources);check('Permissions matrix includes every resource exactly once',grouped.length===rules.ALL_RESOURCES.length&&new Set(grouped).size===grouped.length&&rules.ALL_RESOURCES.every(resource=>grouped.includes(resource)));
+  const viewer=await account('viewer');
+  const checklistFields={propertyName:`QA checklist property ${tag}`,premisesAddress:'QA temporary address, Colombo',unitNo:'QA unit 1',lessorName:`QA checklist landlord ${tag}`,lesseeName:`QA checklist tenant ${tag}`,monthlyRent:'Rs. 50,000',term:'01.10.2026 - 31.12.2026'};
+  for(const user of [manager,accountant,advisor,viewer]){
+    const denied=await action(user,'importChecklist',[{fields:checklistFields}],'/admin/checklists');check(`${user.role} cannot import checklists`,!denied.ok);
+  }
+  const rollbackName=`QA checklist rollback ${tag}`;const rollbackParty=`QA checklist same party ${tag}`;
+  const rolledBack=await action(lawyer,'importChecklist',[{fields:{...checklistFields,propertyName:rollbackName,lessorName:rollbackParty,lesseeName:rollbackParty}}],'/admin/checklists');
+  const [rollbackProperty]=await sql`select count(*)::int as count from property where name=${rollbackName}`;
+  const [rollbackContact]=await sql`select count(*)::int as count from party where display_name=${rollbackParty}`;
+  check('Failed checklist import rolls back its property, units, and contacts',!rolledBack.ok&&rollbackProperty.count===0&&rollbackContact.count===0);
+  async function captureImported(result){
+    assert(result.ok,'Checklist import must succeed');
+    const ids=[result.leaseId,...(result.subLeaseId?[result.subLeaseId]:[])];assert(ids.every(id=>typeof id==='string'&&/^[0-9a-f-]{36}$/.test(id)),'Import returns valid lease IDs');leaseIds.push(...ids);
+    const records=await sql`select id,property_id,lessor_party_id,lessee_party_id,created_by,import_meta from lease where id in ${sql(ids)}`;
+    for(const record of records){if(!propertyIds.includes(record.property_id))propertyIds.push(record.property_id);for(const id of [record.lessor_party_id,record.lessee_party_id])if(!partyIds.includes(id))partyIds.push(id);}
+    return records;
+  }
+  const schedule=(kind,amount)=>({kind,columns:[],cadence:'monthly',tranches:[{startDate:'2026-10-01',endDate:'2026-12-31',monthlyRent:{amount,currency:'LKR'}}]});
+  const imported=await action(lawyer,'importChecklist',[{fields:checklistFields,schedules:[schedule('master',50000),schedule('sub',65000)]}],'/admin/checklists');
+  const importedRecords=await captureImported(imported);check('Lawyer imports a paired checklist with their own authorship',importedRecords.length===2&&importedRecords.every(record=>record.created_by===lawyer.id&&record.import_meta.source==='checklist-upload'));
+  const importedPage=await page(lawyer,'/leases/'+imported.leaseId+'?edit=1');check('Lawyer can open and edit a checklist-created lease',importedPage.response.status===200&&!importedPage.error&&importedPage.body.includes('QA checklist tenant'));
+  const importedLease=importedRecords.find(record=>record.id===imported.leaseId);
+  await good(lawyer,'updateLeaseAction',[imported.leaseId,{occupancyCap:6}],'/leases/'+imported.leaseId);
+  await good(lawyer,'updatePartyAction',[importedLease.lessee_party_id,{address:'QA corrected tenant address'},imported.leaseId],'/leases/'+imported.leaseId);
+  await good(lawyer,'updatePropertyAction',[importedLease.property_id,{addressLine:'QA corrected premises address'},imported.leaseId],'/leases/'+imported.leaseId);
+  const unrelatedParty=await action(lawyer,'updatePartyAction',[lessor.id,{address:'QA forbidden change'},imported.leaseId],'/leases/'+imported.leaseId);check('Lawyer cannot use a visible lease to edit an unrelated contact',!unrelatedParty.ok);
+  const unrelatedProperty=await action(lawyer,'updatePropertyAction',[property.id,{name:'QA forbidden change'},imported.leaseId],'/leases/'+imported.leaseId);check('Lawyer cannot use a visible lease to edit an unrelated property',!unrelatedProperty.ok);
+  const globalContact=await action(lawyer,'updatePartyAction',[importedLease.lessee_party_id,{address:'QA forbidden global change'}],'/leases/'+imported.leaseId);check('Lawyer contact edits require lease context',!globalContact.ok);
+  await good(lawyer,'deleteLeaseAction',[imported.subLeaseId],'/leases/'+imported.subLeaseId);
+  await good(lawyer,'deleteLeaseAction',[imported.leaseId],'/leases/'+imported.leaseId);
+  const deletedChecklist=await sql`select deleted_at from lease where id in ${sql([imported.leaseId,imported.subLeaseId])}`;check('Lawyer can delete both leases from their own checklist',deletedChecklist.every(record=>record.deleted_at));
+  const checklistAudit=await sql`select action,actor_id from lease_audit where lease_id=${imported.leaseId}`;check('Checklist import, edits, and deletion retain the lawyer actor',checklistAudit.some(record=>record.action==='Checklist imported'&&record.actor_id===lawyer.id)&&checklistAudit.some(record=>record.action==='Lease edited'&&record.actor_id===lawyer.id)&&checklistAudit.some(record=>record.action==='Lease deleted'&&record.actor_id===lawyer.id));
+  // The browser's bulk uploader sends concurrent per-file actions.
+  const batch=await Promise.all(['A','B'].map(label=>action(lawyer,'importChecklist',[{fields:{...checklistFields,lesseeName:`QA checklist batch ${label} ${tag}`}}],'/admin/checklists')));
+  for(const item of batch)await captureImported(item);check('Lawyer can import multiple checklists concurrently',batch.every(item=>item.ok));
+  const adminImport=await action(owner,'importChecklist',[{fields:{...checklistFields,lesseeName:`QA checklist admin ${tag}`}}],'/admin/checklists');await captureImported(adminImport);check('Admins retain checklist import access',adminImport.ok);
+  const lawyerCreated=await lease(lawyer,property,lessor,tenants[1]);check('Lawyer can also create a lease manually',Boolean(lawyerCreated.id));await good(lawyer,'deleteLeaseAction',[lawyerCreated.id],'/leases/'+lawyerCreated.id);
+  const assignedDelete=await lease(owner,property,lessor,tenants[0],[{role:'lessor_lawyer',partyId:lawyer.partyId,userId:lawyer.id}]);await good(lawyer,'deleteLeaseAction',[assignedDelete.id],'/leases/'+assignedDelete.id);check('Lawyer can delete an assigned lease created by another user',Boolean((await sql`select deleted_at from lease where id=${assignedDelete.id}`)[0].deleted_at));
   const signup=await fetch(env.NEXT_PUBLIC_SUPABASE_URL+'/auth/v1/signup',{method:'POST',headers:{apikey:env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,'Content-Type':'application/json'},body:JSON.stringify({email:tag+'-signup@example.invalid',password:randomBytes(24).toString('base64url')+'Aa1!'})});const signupResult=await signup.json();if(signupResult.id)users.push({id:signupResult.id});check('Public signup stays disabled',signup.status>=400&&signup.status<500&&signupResult.error_code==='signup_disabled');
   const clientApi=await fetch(env.NEXT_PUBLIC_SUPABASE_URL+'/rest/v1/lease_audit?select=id',{headers:{apikey:env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}});check('Audit Data API is blocked for browser roles',clientApi.status===401||clientApi.status===403);
   writeFileSync('.vercel/supabase-migration/staff-integration-results.json',JSON.stringify({origin,completedAt:new Date().toISOString(),passed:true,checks},null,2),{mode:0o600});

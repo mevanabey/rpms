@@ -174,6 +174,7 @@ export async function importChecklistToBackend(
     clauses: intake.lease.clauses,
     additionalRoles: additionalRoles.length > 0 ? additionalRoles : undefined,
     tranches: trancheIntents(intake.lease.tranches),
+    importMeta: { source: "checklist-upload", fields: intake.rawFields, warnings: intake.warnings },
   });
   c.created++;
 
@@ -195,6 +196,7 @@ export async function importChecklistToBackend(
       endDate: intake.subLease.lease.endDate,
       clauses: intake.subLease.lease.clauses,
       tranches: trancheIntents(intake.subLease.lease.tranches),
+      importMeta: { source: "checklist-upload", fields: intake.rawFields, paired: true },
     });
     c.created++;
   }

@@ -75,7 +75,7 @@ const rpmsNav: NavGroup[] = [
       { title: "Rent", url: "/rent", icon: Receipt, requires: ["payments:read"] },
       { title: "Properties", url: "/properties", icon: Building2, requires: ["properties:read"] },
       { title: "Parties", url: "/parties", icon: Users, requires: ["parties:read"] },
-      { title: "Checklist upload", url: "/admin/checklists", icon: Sparkles, requires: ["admin:import"] },
+      { title: "Checklist upload", url: "/admin/checklists", icon: Sparkles, requires: ["checklists:manage"] },
       // { title: "Units", url: "/units", icon: Gauge, requires: ["units:read"] },
     ],
   },

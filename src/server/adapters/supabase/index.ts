@@ -297,7 +297,7 @@ export const supabaseBackend: Backend = {
             legalFeesAmount: moneyStr(intent.legalFees),
             legalFeesCurrency: moneyCur(intent.legalFees),
             clauses: intent.clauses ?? null,
-            importMeta: null,
+            importMeta: intent.importMeta ?? null,
           })
           .returning({ id: leaseTable.id });
 
