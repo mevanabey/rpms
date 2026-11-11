@@ -66,17 +66,19 @@ export const getCurrentAppUser = cache(async (): Promise<AppUser | null> => {
     if (role === "advisor") return [...PARTICIPANT_ROLES.advisor];
     return [];
   });
-  const assignments = participantRoles.length
-    ? await db
+  const [assignments, created] = await Promise.all([
+    participantRoles.length
+      ? db
         .select({ leaseId: leasePartyRoleTable.leaseId })
         .from(leasePartyRoleTable)
         .where(and(
           eq(leasePartyRoleTable.userId, sbUser.id),
           inArray(leasePartyRoleTable.role, participantRoles),
         ))
-    : [];
-  const created = await db.select({ id: leaseTable.id }).from(leaseTable)
-    .where(eq(leaseTable.createdBy, sbUser.id));
+      : Promise.resolve([]),
+    db.select({ id: leaseTable.id }).from(leaseTable)
+      .where(eq(leaseTable.createdBy, sbUser.id)),
+  ]);
 
   return {
     id: sbUser.id,

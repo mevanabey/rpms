@@ -30,7 +30,6 @@ import {
 } from "@/lib/demo/use-store";
 import { cn } from "@/lib/utils";
 import { fromLease } from "@/templates/leases/lease-document-data";
-import { downloadLeaseAgreement } from "@/templates/leases/lease-template-render";
 
 export function LeaseDocumentSection({
   lease,
@@ -88,6 +87,7 @@ export function LeaseDocumentSection({
   const handleDownload = () => {
     startDownload(async () => {
       try {
+        const { downloadLeaseAgreement } = await import("@/templates/leases/lease-template-render");
         await downloadLeaseAgreement(data, settings);
       } catch (err) {
         toast.error("Could not generate lease document", {

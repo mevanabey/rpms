@@ -42,14 +42,14 @@ function formatLkrUsd(totals: Record<Currency, number>): string {
 export default async function Home() {
   const TODAY = new Date().toISOString().slice(0, 10);
   const user = await requireAppUser();
-  const activity = await recentLeaseAudit(6);
   const canViewRent = can(user, DEFAULT_PERMISSIONS, "payments:read");
   const backend = getBackend();
-  const [allLeases, allParties, allProperties, allLedger] = await Promise.all([
+  const [allLeases, allParties, allProperties, allLedger, activity] = await Promise.all([
     backend.leases.list(),
     backend.parties.list(),
     backend.properties.listProperties(),
     canViewRent ? backend.payments.listLedger({ kind: ["rent"] }) : Promise.resolve([]),
+    recentLeaseAudit(6),
   ]);
   const leases = scopeByLease(user, allLeases, (lease) => lease.id);
   const visibleIds = new Set(leases.map((lease) => lease.id));

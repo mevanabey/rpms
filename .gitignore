@@ -2,7 +2,7 @@
 
 # dependencies
 /node_modules
-# pnpm's virtual store, relocated by .npmrc. Desktop & Documents iCloud sync is
+# pnpm's virtual store, relocated by pnpm-workspace.yaml. Desktop & Documents iCloud sync is
 # enabled on this machine, and iCloud evicts package files, which stalled tsc
 # and eslint for seconds per file. Anything ending in .nosync is ignored by
 # iCloud Drive, so the real package content lives here instead.

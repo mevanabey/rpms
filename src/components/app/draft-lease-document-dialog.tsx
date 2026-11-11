@@ -25,7 +25,6 @@ import {
   fromDraftIntent,
   type LeaseDocumentData,
 } from "@/templates/leases/lease-document-data";
-import { downloadLeaseAgreement } from "@/templates/leases/lease-template-render";
 
 export function DraftLeaseDocumentDialog({
   draftId,
@@ -89,7 +88,10 @@ export function DraftLeaseDocumentDialog({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => startDownload(async () => { await downloadLeaseAgreement(data, settings); })}
+            onClick={() => startDownload(async () => {
+              const { downloadLeaseAgreement } = await import("@/templates/leases/lease-template-render");
+              await downloadLeaseAgreement(data, settings);
+            })}
             disabled={downloading}
           >
             <Download className="size-3.5" />

@@ -1,3 +1,4 @@
+import { Suspense, type ComponentProps } from "react";
 import { can, DEFAULT_PERMISSIONS } from "@/lib/demo/identity";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -22,6 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -79,6 +81,11 @@ function monthsBetween(startIso: string, endIso: string): number {
   );
 }
 
+async function LeaseParticipantsSection(props: Omit<ComponentProps<typeof LeaseParticipants>, "staff">) {
+  const staff = props.canEdit ? await getAssignableStaff() : [];
+  return <LeaseParticipants {...props} staff={staff} />;
+}
+
 export default async function LeaseDetailPage({
   params,
   searchParams,
@@ -95,16 +102,14 @@ export default async function LeaseDetailPage({
   const lease = await backend.leases.get(id);
   if (!lease) notFound();
   const historyPage = Math.max(1, Number(query.historyPage) || 1);
-  const history = await listLeaseAudit({ leaseId: id, page: historyPage, pageSize: 25 });
-
-  const [allParties, propertyAll, propertyUnits, allObligations, allLedger, allLeases, staff] = await Promise.all([
+  const [allParties, propertyAll, propertyUnits, allObligations, allLedger, allLeases, history] = await Promise.all([
     backend.parties.list(),
     backend.properties.getProperty(lease.propertyId),
     backend.properties.listUnits(lease.propertyId),
     backend.payments.listObligations(lease.id),
     backend.payments.listLedger({ leaseId: lease.id }),
     backend.leases.list(),
-    can(user, DEFAULT_PERMISSIONS, "leases:write") ? getAssignableStaff() : Promise.resolve([]),
+    listLeaseAudit({ leaseId: id, page: historyPage, pageSize: 25 }),
   ]);
   const visibleLeases = scopeByLease(user, allLeases, (item) => item.id);
   const canEdit = can(user, DEFAULT_PERMISSIONS, "leases:write");
@@ -322,8 +327,9 @@ export default async function LeaseDetailPage({
         today={today}
       />}
 
-      <LeaseParticipants lease={lease} parties={parties} staff={staff}
-        canEdit={canEdit} />
+      <Suspense fallback={<Skeleton className="h-48 w-full" role="status" aria-label="Loading team and contacts" />}>
+        <LeaseParticipantsSection lease={lease} parties={parties} canEdit={canEdit} />
+      </Suspense>
 
       {/* Below the progress block, the operator can toggle between the rich
           default layout and a compact two-column "details" table. The rent

@@ -1,3 +1,8 @@
+# Keep dependency files out of iCloud Drive under ~/Documents. pnpm 11
+# reads this setting here, not in .npmrc. Stay inside the project so
+# Turbopack can compile the packages.
+virtualStoreDir: .pnpm.nosync
+
 allowBuilds:
   esbuild: true
   sharp: true

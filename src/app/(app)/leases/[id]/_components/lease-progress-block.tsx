@@ -37,7 +37,6 @@ import {
   sendLeaseEmailAction,
   uploadLeaseAgreementAction,
 } from "@/server/actions";
-import { downloadInvoice } from "@/templates/leases/lease-invoice";
 
 import { MarkRentPaidDialog } from "./mark-rent-paid-dialog";
 import { useOptimisticPaidEntries } from "./use-lease-payments-store";
@@ -614,6 +613,7 @@ function ActivePanel({
       }
       try {
         const t = res.data.tranches[0];
+        const { downloadInvoice } = await import("@/templates/leases/lease-invoice");
         await downloadInvoice(res.data, {
           amount: t?.monthlyRent,
           dueDate: adjNextDueDate,

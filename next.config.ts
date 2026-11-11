@@ -18,7 +18,7 @@ const nextConfig: NextConfig = {
   // ~/Documents is synced; iCloud evicts build artifacts and every re-read
   // blocks while they download, which stalls dev and build. iCloud ignores any
   // path ending in `.nosync`. `distDir` must stay inside the project directory,
-  // so this is a rename rather than a relocation. See also `.npmrc`, which does
+  // so this is a rename rather than a relocation. See also `pnpm-workspace.yaml`, which does
   // the same for pnpm's virtual store.
   //
   // CI has no iCloud and no reason to pay for the rename — and Vercel's Next.js

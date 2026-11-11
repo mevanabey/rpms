@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 
 import { recentLeaseAudit } from "@/server/audit";
 
@@ -14,8 +14,13 @@ import { SearchDialog } from "./sidebar/search-dialog";
 import { TourLauncher } from "./tour-launcher";
 import { ThemeToggle } from "./theme-toggle";
 
+async function RecentActivityBell() {
+  const activity = await recentLeaseAudit();
+  return <NotificationBell entries={activity} />;
+}
+
 export async function DashboardShell({ children }: Readonly<{ children: ReactNode }>) {
-  const [cookieStore, activity] = await Promise.all([cookies(), recentLeaseAudit()]);
+  const cookieStore = await cookies();
   const defaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
 
   return (
@@ -47,7 +52,9 @@ export async function DashboardShell({ children }: Readonly<{ children: ReactNod
                 orientation="vertical"
                 className="data-[orientation=vertical]:h-4 data-[orientation=vertical]:self-center hidden sm:flex"
               />
-              <NotificationBell entries={activity} />
+              <Suspense fallback={<span className="size-8 animate-pulse rounded-md bg-muted" role="status" aria-label="Loading recent activity" />}>
+                <RecentActivityBell />
+              </Suspense>
               <TourLauncher />
               <ThemeToggle />
             </div>

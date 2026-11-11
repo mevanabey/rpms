@@ -25,10 +25,14 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // IMPORTANT: do not run code between createServerClient and getUser — any
+  // IMPORTANT: do not run code between createServerClient and getClaims — any
   // logic here will see a stale session and is liable to cause silent
   // sign-outs. See https://supabase.com/docs/guides/auth/server-side/nextjs.
-  await supabase.auth.getUser();
+  // Refresh and verify the token here. With asymmetric signing keys this
+  // uses cached public keys instead of an Auth-server round trip on every
+  // navigation. getAuthUser still calls getUser in the server data layer to
+  // check the current account before any protected data is returned.
+  await supabase.auth.getClaims();
 
   return supabaseResponse;
 }

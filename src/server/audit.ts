@@ -41,5 +41,10 @@ export async function getLeaseAuditEntry(id: string): Promise<LeaseAuditEntry | 
 export async function recentLeaseAudit(limit = 10): Promise<LeaseAuditEntry[]> {
   const user = await requireAppUser();
   if (!can(user, DEFAULT_PERMISSIONS, "leases:read")) return [];
-  return (await listLeaseAudit({ pageSize: limit })).entries;
+  // Header/dashboard previews have no pagination, so don't count the entire
+  // visible audit history just to display a handful of recent entries.
+  const size = Math.max(1, Math.min(100, limit));
+  const rows = await db.select().from(leaseAudit).where(visibleHistory(user))
+    .orderBy(desc(leaseAudit.createdAt), desc(leaseAudit.id)).limit(size);
+  return rows.map((row): LeaseAuditEntry => ({ ...row, createdAt: row.createdAt.toISOString() }));
 }
