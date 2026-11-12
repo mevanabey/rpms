@@ -1,16 +1,17 @@
 import "server-only";
 
 import type { Backend } from "@/core/services";
+import type { AppUser } from "@/lib/demo/identity";
 import { requireAppUser } from "@/lib/auth/identity";
-import { canSeeLease, scopeByLease } from "@/lib/demo/scope";
+import { canSeeLease, scopedLeaseIds, scopeByLease } from "@/lib/demo/scope";
 import { withAudit } from "@/server/db/client";
 
 /** Apply scoping before any service result reaches a page, export, or action.
  * Actors come from the verified session, never a client-supplied user ID. */
-export function secureBackend(backend: Backend): Backend {
+export function secureBackend(backend: Backend, getUser: () => Promise<AppUser> = requireAppUser): Backend {
   function audited<A extends unknown[], R>(action: string, operation: (...args: A) => Promise<R>) {
     return async (...args: A): Promise<R> => {
-      const actor = await requireAppUser();
+      const actor = await getUser();
       return withAudit(actor, action, () => operation(...args));
     };
   }
@@ -19,12 +20,38 @@ export function secureBackend(backend: Backend): Backend {
     leases: {
       ...backend.leases,
       async list(filter) {
-        const user = await requireAppUser();
-        return scopeByLease(user, await backend.leases.list(filter), (lease) => lease.id);
+        const user = await getUser();
+        const ids = scopedLeaseIds(user, filter?.ids);
+        if (ids?.length === 0) return [];
+        return scopeByLease(user, await backend.leases.list({ ...filter, ids }), (lease) => lease.id);
+      },
+      async listOverview(filter) {
+        const user = await getUser();
+        const ids = scopedLeaseIds(user, filter?.ids);
+        if (ids?.length === 0) return [];
+        return scopeByLease(user, await backend.leases.listOverview({ ...filter, ids }), (row) => row.lease.id);
       },
       async get(id) {
-        const user = await requireAppUser();
+        const user = await getUser();
         return canSeeLease(user, id) ? backend.leases.get(id) : null;
+      },
+      async getDetails(id) {
+        const user = await getUser();
+        if (!canSeeLease(user, id)) return null;
+        const result = await backend.leases.getDetails(id);
+        if (!result) return null;
+        const relatedLeases = scopeByLease(user, result.relatedLeases, (lease) => lease.id);
+        const partyIds = new Set([result.lease, ...relatedLeases].flatMap((lease) => [
+          lease.lessorPartyId, lease.lesseePartyId,
+          ...(lease.additionalRoles ?? []).map((role) => role.partyId),
+        ]));
+        return {
+          ...result,
+          relatedLeases,
+          parties: result.parties.filter((party) => partyIds.has(party.id)),
+          ledger: result.ledger.filter((entry) => entry.leaseId === id),
+          obligations: result.obligations.filter((entry) => entry.leaseId === id),
+        };
       },
       create: audited("Lease created", backend.leases.create),
       update: audited("Lease edited", backend.leases.update),
@@ -52,15 +79,18 @@ export function secureBackend(backend: Backend): Backend {
     payments: {
       ...backend.payments,
       async listLedger(filter) {
-        const user = await requireAppUser();
-        return scopeByLease(user, await backend.payments.listLedger(filter), (entry) => entry.leaseId);
+        const user = await getUser();
+        if (filter?.leaseId && !canSeeLease(user, filter.leaseId)) return [];
+        const leaseIds = scopedLeaseIds(user, filter?.leaseIds);
+        if (leaseIds?.length === 0) return [];
+        return scopeByLease(user, await backend.payments.listLedger({ ...filter, leaseIds }), (entry) => entry.leaseId);
       },
       async listObligations(id) {
-        const user = await requireAppUser();
+        const user = await getUser();
         return scopeByLease(user, await backend.payments.listObligations(id), (entry) => entry.leaseId);
       },
       async inboxQueue() {
-        const user = await requireAppUser();
+        const user = await getUser();
         return scopeByLease(user, await backend.payments.inboxQueue(), (entry) => entry.leaseId);
       },
       markPaid: audited("Rent marked paid", backend.payments.markPaid),

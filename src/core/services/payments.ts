@@ -2,6 +2,8 @@ import type { LedgerEntry, LedgerKind, Money, Obligation, PaymentMethod } from "
 
 export interface PaymentListFilter {
   leaseId?: string;
+  /** Explicit server-side scope. An empty array matches no entries. */
+  leaseIds?: string[];
   kind?: LedgerKind[];
   paid?: boolean;
   from?: string;

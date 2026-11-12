@@ -13,6 +13,14 @@ export function canSeeLease(user: AppUser | null, leaseId: string): boolean {
     (user.createdLeaseIds ?? []).includes(leaseId);
 }
 
+/** Undefined means portfolio access; [] means no accessible leases. Intersect
+ * requested IDs with the verified user's scope rather than replacing it. */
+export function scopedLeaseIds(user: AppUser, requested?: string[]): string[] | undefined {
+  if (hasRole(user, "admin")) return requested;
+  const allowed = new Set([...(user.assignedLeaseIds ?? []), ...(user.createdLeaseIds ?? [])]);
+  return requested ? [...new Set(requested)].filter((id) => allowed.has(id)) : [...allowed];
+}
+
 /** Filter an array of lease-keyed rows down to what `user` may see. */
 export function scopeByLease<T>(
   user: AppUser | null,

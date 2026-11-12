@@ -53,6 +53,7 @@ export const mockBackend: Backend = {
   leases: {
     async list(filter) {
       let out = state.leases.filter((l) => !state.deletedLeaseIds.has(l.id));
+      if (filter?.ids) out = out.filter((lease) => filter.ids!.includes(lease.id));
       if (filter?.status?.length) out = out.filter((l) => filter.status!.includes(l.status));
       if (filter?.propertyId) out = out.filter((l) => l.propertyId === filter.propertyId);
       if (filter?.cadence) out = out.filter((l) => l.paymentCadence === filter.cadence);
@@ -61,6 +62,36 @@ export const mockBackend: Backend = {
         out = out.filter((l) => norm(l.id).includes(q) || norm(l.propertyId).includes(q));
       }
       return out;
+    },
+    async listOverview(filter) {
+      const leases = await mockBackend.leases.list(filter);
+      return leases.map((lease) => ({
+        lease,
+        property: state.properties.find((property) => property.id === lease.propertyId),
+        lessor: state.parties.find((party) => party.id === lease.lessorPartyId),
+        lessee: state.parties.find((party) => party.id === lease.lesseePartyId),
+        advisor: state.parties.find((party) => party.id === lease.additionalRoles?.find((role) => role.role === "advisor")?.partyId),
+        nextRentEntry: state.ledger.filter((entry) => entry.leaseId === lease.id && entry.kind === "rent" && entry.direction === "in" && !entry.paidDate)
+          .sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0],
+      }));
+    },
+    async getDetails(id) {
+      const lease = await mockBackend.leases.get(id);
+      if (!lease) return null;
+      const relatedLeases = state.leases.filter((other) => !state.deletedLeaseIds.has(other.id) &&
+        (other.id === lease.parentLeaseId || other.parentLeaseId === id));
+      const partyIds = new Set([lease, ...relatedLeases].flatMap((item) => [
+        item.lessorPartyId, item.lesseePartyId, ...(item.additionalRoles ?? []).map((role) => role.partyId),
+      ]));
+      return {
+        lease,
+        property: state.properties.find((property) => property.id === lease.propertyId) ?? null,
+        units: state.units.filter((unit) => unit.propertyId === lease.propertyId),
+        parties: state.parties.filter((party) => partyIds.has(party.id)),
+        obligations: await mockBackend.payments.listObligations(id),
+        ledger: await mockBackend.payments.listLedger({ leaseId: id }),
+        relatedLeases,
+      };
     },
     async get(id) {
       if (state.deletedLeaseIds.has(id)) return null;
@@ -392,6 +423,7 @@ export const mockBackend: Backend = {
     async listLedger(filter) {
       let out = state.ledger;
       if (filter?.leaseId) out = out.filter((e) => e.leaseId === filter.leaseId);
+      if (filter?.leaseIds) out = out.filter((e) => filter.leaseIds!.includes(e.leaseId));
       if (filter?.kind?.length) out = out.filter((e) => filter.kind!.includes(e.kind));
       if (filter?.paid !== undefined) {
         out = out.filter((e) => Boolean(e.paidDate) === filter.paid);

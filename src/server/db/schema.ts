@@ -571,6 +571,17 @@ export const unitRelations = relations(unit, ({ one, many }) => ({
 }));
 
 export const leaseRelations = relations(lease, ({ one, many }) => ({
+  creator: one(userRole, {
+    fields: [lease.createdBy],
+    references: [userRole.userId],
+    relationName: "lease_creator",
+  }),
+  parent: one(lease, {
+    fields: [lease.parentLeaseId],
+    references: [lease.id],
+    relationName: "lease_parent",
+  }),
+  children: many(lease, { relationName: "lease_parent" }),
   legalEntity: one(legalEntity, {
     fields: [lease.legalEntityId],
     references: [legalEntity.id],
@@ -610,6 +621,11 @@ export const leaseUnitRelations = relations(leaseUnit, ({ one }) => ({
 export const leasePartyRoleRelations = relations(
   leasePartyRoleTable,
   ({ one }) => ({
+    user: one(userRole, {
+      fields: [leasePartyRoleTable.userId],
+      references: [userRole.userId],
+      relationName: "staff_assignment",
+    }),
     lease: one(lease, {
       fields: [leasePartyRoleTable.leaseId],
       references: [lease.id],
@@ -620,6 +636,11 @@ export const leasePartyRoleRelations = relations(
     }),
   }),
 );
+
+export const userRoleRelations = relations(userRole, ({ many }) => ({
+  assignments: many(leasePartyRoleTable, { relationName: "staff_assignment" }),
+  createdLeases: many(lease, { relationName: "lease_creator" }),
+}));
 
 export const rentScheduleTrancheRelations = relations(
   rentScheduleTranche,

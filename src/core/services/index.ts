@@ -31,6 +31,8 @@ export type {
   LeaseClausesPatch,
   LeaseCreateIntent,
   LeaseListFilter,
+  LeaseOverview,
+  LeaseDetails,
   LeaseUpdateInput,
   TrancheUpdateInput,
 } from "./leases";

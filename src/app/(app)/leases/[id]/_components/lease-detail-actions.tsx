@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import type { Lease, Party } from "@/core/types";
 import {
   downloadBase64File,
@@ -52,8 +53,8 @@ export function LeaseDetailActions({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const progressOpen = useProgressOpen(lease.id);
   const toggleProgress = useProgressCollapse((s) => s.toggle);
-  const viewMode = useLeaseViewMode(lease.id);
-  const toggleView = useLeaseViewStore((s) => s.toggle);
+  const viewMode = useLeaseViewMode();
+  const setView = useLeaseViewStore((s) => s.setMode);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Optimistic flag — flips the moment a signed-lease upload returns
   // success, so the button switches to "View signed lease" without waiting
@@ -142,23 +143,29 @@ export function LeaseDetailActions({
 
   return (
     <>
-      {/* Edit mode owns the view — it forces the details list on, and puts
-          the previous view back when it's switched off — so the manual view
-          toggle is disabled while editing. */}
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => toggleView(lease.id)}
-        aria-pressed={viewMode === "details"}
-        disabled={editing}
-      >
-        {viewMode === "details" ? (
-          <LayoutGrid className="size-3.5" />
-        ) : (
+      {/* Editing temporarily forces List View without replacing the saved preference. */}
+      <ButtonGroup aria-label="Lease view">
+        <Button
+          variant={viewMode === "list" || editing ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => setView("list")}
+          aria-pressed={viewMode === "list" || editing}
+          disabled={editing}
+        >
           <Rows3 className="size-3.5" />
-        )}
-        {viewMode === "details" ? "Default view" : "Details view"}
-      </Button>
+          List View
+        </Button>
+        <Button
+          variant={viewMode === "card" && !editing ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => setView("card")}
+          aria-pressed={viewMode === "card" && !editing}
+          disabled={editing}
+        >
+          <LayoutGrid className="size-3.5" />
+          Card View
+        </Button>
+      </ButtonGroup>
       <Button
         variant="outline"
         size="sm"

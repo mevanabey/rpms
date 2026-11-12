@@ -18,6 +18,9 @@ import {
 import type { Backend } from "@/core/services";
 import type {
   LeaseCreateIntent,
+  LeaseDetails,
+  LeaseListFilter,
+  LeaseOverview,
   LeaseUpdateInput,
   MarkPaidInput,
   PartyCreateInput,
@@ -31,11 +34,9 @@ import type {
   LedgerEntry,
   LedgerKind,
   Lease,
-  LeaseStatus,
   Notification,
   Obligation,
   Party,
-  PaymentCadence,
   Property,
   Unit,
 } from "@/core/types";
@@ -101,16 +102,6 @@ async function loadLeaseChildren(leaseIds: string[]) {
       .where(inArray(leaseUnitTable.leaseId, leaseIds)),
   ]);
   return { tranches, partyRoles, units };
-}
-
-function indexByLease<T extends { leaseId: string }>(rows: T[]): Map<string, T[]> {
-  const m = new Map<string, T[]>();
-  for (const r of rows) {
-    const bucket = m.get(r.leaseId);
-    if (bucket) bucket.push(r);
-    else m.set(r.leaseId, [r]);
-  }
-  return m;
 }
 
 function addMonthsIso(iso: string, months: number): string {
@@ -184,71 +175,118 @@ async function loadLedgerEntry(id: string): Promise<LedgerEntry> {
   return toLedgerEntry(row);
 }
 
+// Relational reads use lateral joins/JSON aggregation to return one row per
+// lease in one SQL statement, avoiding a round trip for each child table.
+const leaseChildren = { tranches: true, partyRoles: true, units: true } as const;
+type LeaseJoinedRow = typeof leaseTable.$inferSelect & Omit<Parameters<typeof toLease>[0], "lease">;
+
+function mapLeaseRow(row: LeaseJoinedRow): Lease {
+  return toLease({ lease: row, tranches: row.tranches, partyRoles: row.partyRoles, units: row.units });
+}
+
+function leaseWhere(filter?: LeaseListFilter) {
+  const conditions = [isNull(leaseTable.deletedAt)];
+  if (filter?.ids) conditions.push(filter.ids.length ? inArray(leaseTable.id, filter.ids) : sql`false`);
+  if (filter?.status?.length) conditions.push(inArray(leaseTable.status, filter.status));
+  if (filter?.propertyId) conditions.push(eq(leaseTable.propertyId, filter.propertyId));
+  if (filter?.cadence) conditions.push(eq(leaseTable.paymentCadence, filter.cadence));
+  if (filter?.search) {
+    const needle = `%${escapeLike(filter.search)}%`;
+    conditions.push(or(ilike(leaseTable.id, needle), ilike(leaseTable.propertyId, needle))!);
+  }
+  return and(...conditions);
+}
+
 // ──────────────────────────────────────────────────────── Adapter
 
 export const supabaseBackend: Backend = {
   leases: {
     async list(filter): Promise<Lease[]> {
-      // Soft-deleted leases are hidden from every read.
-      const conditions = [isNull(leaseTable.deletedAt)];
-      if (filter?.status?.length) {
-        conditions.push(inArray(leaseTable.status, filter.status as LeaseStatus[]));
-      }
-      if (filter?.propertyId) {
-        conditions.push(eq(leaseTable.propertyId, filter.propertyId));
-      }
-      if (filter?.cadence) {
-        conditions.push(eq(leaseTable.paymentCadence, filter.cadence as PaymentCadence));
-      }
-      if (filter?.search) {
-        const needle = `%${escapeLike(filter.search)}%`;
-        conditions.push(
-          or(
-            ilike(leaseTable.id, needle),
-            ilike(leaseTable.propertyId, needle),
-          )!,
-        );
-      }
+      const rows = await db.query.lease.findMany({
+        where: leaseWhere(filter),
+        orderBy: desc(leaseTable.startDate),
+        with: leaseChildren,
+      });
+      return rows.map(mapLeaseRow);
+    },
 
-      const rows = await db
-        .select()
-        .from(leaseTable)
-        .where(conditions.length ? and(...conditions) : undefined)
-        .orderBy(desc(leaseTable.startDate));
-
-      if (rows.length === 0) return [];
-
-      const ids = rows.map((r) => r.id);
-      const children = await loadLeaseChildren(ids);
-      const tBy = indexByLease(children.tranches);
-      const prBy = indexByLease(children.partyRoles);
-      const uBy = indexByLease(children.units);
-
-      return rows.map((lease) =>
-        toLease({
-          lease,
-          tranches: tBy.get(lease.id) ?? [],
-          partyRoles: prBy.get(lease.id) ?? [],
-          units: uBy.get(lease.id) ?? [],
-        }),
-      );
+    async listOverview(filter): Promise<LeaseOverview[]> {
+      // One statement includes the table's labels and just the next unpaid
+      // incoming rent line per lease, rather than the complete rent ledger.
+      const rows = await db.query.lease.findMany({
+        where: leaseWhere(filter),
+        orderBy: desc(leaseTable.startDate),
+        with: {
+          ...leaseChildren,
+          property: true,
+          lessor: true,
+          lessee: true,
+          partyRoles: { with: { party: true } },
+          ledger: {
+            where: (entry) => and(eq(entry.kind, "rent"), eq(entry.direction, "in"), isNull(entry.paidDate)),
+            orderBy: (entry) => asc(entry.dueDate),
+            limit: 1,
+          },
+        },
+      });
+      return rows.map((row) => {
+        const advisor = row.partyRoles.find((role) => role.role === "advisor")?.party;
+        return {
+          lease: mapLeaseRow(row),
+          property: row.property ? toProperty(row.property) : undefined,
+          lessor: row.lessor ? toParty(row.lessor) : undefined,
+          lessee: row.lessee ? toParty(row.lessee) : undefined,
+          advisor: advisor ? toParty(advisor) : undefined,
+          nextRentEntry: row.ledger[0] ? toLedgerEntry(row.ledger[0]) : undefined,
+        };
+      });
     },
 
     async get(id): Promise<Lease | null> {
-      const [row] = await db
-        .select()
-        .from(leaseTable)
-        .where(and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt)))
-        .limit(1);
-      if (!row) return null;
-
-      const children = await loadLeaseChildren([id]);
-      return toLease({
-        lease: row,
-        tranches: children.tranches,
-        partyRoles: children.partyRoles,
-        units: children.units,
+      const row = await db.query.lease.findFirst({
+        where: and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt)),
+        with: leaseChildren,
       });
+      return row ? mapLeaseRow(row) : null;
+    },
+
+    async getDetails(id): Promise<LeaseDetails | null> {
+      const row = await db.query.lease.findFirst({
+        where: and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt)),
+        with: {
+          ...leaseChildren,
+          property: { with: { units: true } },
+          lessor: true,
+          lessee: true,
+          partyRoles: { with: { party: true } },
+          obligations: { orderBy: (entry) => asc(entry.dueDate) },
+          ledger: { orderBy: (entry) => asc(entry.dueDate) },
+          parent: { with: { ...leaseChildren, lessee: true } },
+          children: {
+            where: (child) => isNull(child.deletedAt),
+            orderBy: (child) => desc(child.startDate),
+            with: { ...leaseChildren, lessee: true },
+          },
+        },
+      });
+      if (!row) return null;
+      const relatives = [
+        ...(row.parent && !row.parent.deletedAt ? [row.parent] : []),
+        ...row.children,
+      ];
+      const parties = [row.lessor, row.lessee,
+        ...row.partyRoles.map((role) => role.party),
+        ...relatives.map((relative) => relative.lessee),
+      ].flatMap((party) => party ? [toParty(party)] : []);
+      return {
+        lease: mapLeaseRow(row),
+        property: row.property ? toProperty(row.property) : null,
+        units: row.property?.units.map(toUnit) ?? [],
+        parties: [...new Map(parties.map((party) => [party.id, party])).values()],
+        obligations: row.obligations.map(toObligation),
+        ledger: row.ledger.map(toLedgerEntry),
+        relatedLeases: relatives.map(mapLeaseRow),
+      };
     },
 
     async create(intent: LeaseCreateIntent): Promise<Lease> {
@@ -900,6 +938,9 @@ export const supabaseBackend: Backend = {
       const conditions = [];
       if (filter?.leaseId) {
         conditions.push(eq(ledgerEntryTable.leaseId, filter.leaseId));
+      }
+      if (filter?.leaseIds) {
+        conditions.push(filter.leaseIds.length ? inArray(ledgerEntryTable.leaseId, filter.leaseIds) : sql`false`);
       }
       if (filter?.kind?.length) {
         conditions.push(

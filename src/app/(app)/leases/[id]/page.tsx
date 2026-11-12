@@ -86,6 +86,22 @@ async function LeaseParticipantsSection(props: Omit<ComponentProps<typeof LeaseP
   return <LeaseParticipants {...props} staff={staff} />;
 }
 
+async function LeaseHistorySection({ leaseId, page }: { leaseId: string; page: number }) {
+  const history = await listLeaseAudit({ leaseId, page, pageSize: 25 });
+  return (
+    <Card>
+      <CardHeader><CardTitle>Lease history</CardTitle><CardDescription>Who created, edited, uploaded, progressed, and recorded payments for this lease. {history.total} changes recorded.</CardDescription></CardHeader>
+      <CardContent>
+        <LeaseAuditHistory entries={history.entries} />
+        <div className="flex gap-4 mt-4 text-sm">
+          {history.page > 1 && <Link className="text-primary hover:underline" href={`?historyPage=${history.page - 1}`}>Newer changes</Link>}
+          {history.page * history.pageSize < history.total && <Link className="text-primary hover:underline" href={`?historyPage=${history.page + 1}`}>Older changes</Link>}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default async function LeaseDetailPage({
   params,
   searchParams,
@@ -99,26 +115,20 @@ export default async function LeaseDetailPage({
   // the lease detail page is the one and only place a lease is edited.
   const startInEditMode = (can(user, DEFAULT_PERMISSIONS, "leases:write")) && query.edit === "1";
   const backend = getBackend();
-  const lease = await backend.leases.get(id);
-  if (!lease) notFound();
-  const historyPage = Math.max(1, Number(query.historyPage) || 1);
-  const [allParties, propertyAll, propertyUnits, allObligations, allLedger, allLeases, history] = await Promise.all([
-    backend.parties.list(),
-    backend.properties.getProperty(lease.propertyId),
-    backend.properties.listUnits(lease.propertyId),
-    backend.payments.listObligations(lease.id),
-    backend.payments.listLedger({ leaseId: lease.id }),
-    backend.leases.list(),
-    listLeaseAudit({ leaseId: id, page: historyPage, pageSize: 25 }),
-  ]);
-  const visibleLeases = scopeByLease(user, allLeases, (item) => item.id);
   const canEdit = can(user, DEFAULT_PERMISSIONS, "leases:write");
-  const partyIds = new Set([
-    lease.lessorPartyId,
-    lease.lesseePartyId,
-    ...(lease.additionalRoles ?? []).map((item) => item.partyId),
+  const [details, directory] = await Promise.all([
+    backend.leases.getDetails(id),
+    canEdit ? backend.parties.list() : Promise.resolve([]),
   ]);
-  const parties = canEdit ? allParties : allParties.filter((party) => partyIds.has(party.id));
+  if (!details) notFound();
+  const { lease, property: propertyAll, units: propertyUnits, obligations: allObligations, ledger: allLedger } = details;
+  const historyPage = Math.max(1, Number(query.historyPage) || 1);
+  const visibleLeases = scopeByLease(user, details.relatedLeases, (item) => item.id);
+  const partyIds = new Set([lease, ...visibleLeases].flatMap((item) => [
+    item.lessorPartyId, item.lesseePartyId,
+    ...(item.additionalRoles ?? []).map((role) => role.partyId),
+  ]));
+  const parties = canEdit ? directory : details.parties.filter((party) => partyIds.has(party.id));
   const units = canEdit ? propertyUnits : propertyUnits.filter((unit) => lease.unitIds.includes(unit.id));
 
   const partyById = partyMap(parties);
@@ -331,13 +341,12 @@ export default async function LeaseDetailPage({
         <LeaseParticipantsSection lease={lease} parties={parties} canEdit={canEdit} />
       </Suspense>
 
-      {/* Below the progress block, the operator can toggle between the rich
-          default layout and a compact two-column "details" table. The rent
+      {/* Below the progress block, the operator can toggle between Card View and the compact two-column List View. The rent
           schedule + obligations + ledger render in BOTH views below this
           switch. Documents + Lease document also live in both at the bottom. */}
       <LeaseViewSwitch
         leaseId={lease.id}
-        defaultView={
+        cardView={
           <>
             <PremisesCard
               property={propertyAll ?? undefined}
@@ -347,7 +356,7 @@ export default async function LeaseDetailPage({
             />
           </>
         }
-        detailsView={
+        listView={
           <LeaseDetailsTable
             lease={lease}
             parties={parties}
@@ -357,12 +366,12 @@ export default async function LeaseDetailPage({
         }
       />
 
-      {/* Default-view-only block: parties, clauses, sub-tenancies, units.
-          In details view these are replaced by the two-column table above. */}
+      {/* Card-View-only block: parties, clauses, sub-tenancies, units.
+          In List View these are replaced by the two-column table above. */}
       <LeaseViewSwitch
         leaseId={lease.id}
-        detailsView={null}
-        defaultView={
+        listView={null}
+        cardView={
           <div className="flex flex-col gap-4 md:gap-6">
       {/* Parties + key dates */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -722,16 +731,9 @@ export default async function LeaseDetailPage({
         units={units}
         readOnly={!canEdit}
       />
-      <Card>
-        <CardHeader><CardTitle>Lease history</CardTitle><CardDescription>Who created, edited, uploaded, progressed, and recorded payments for this lease. {history.total} changes recorded.</CardDescription></CardHeader>
-        <CardContent>
-          <LeaseAuditHistory entries={history.entries} />
-          <div className="flex gap-4 mt-4 text-sm">
-            {history.page > 1 && <Link className="text-primary hover:underline" href={`?historyPage=${history.page - 1}`}>Newer changes</Link>}
-            {history.page * history.pageSize < history.total && <Link className="text-primary hover:underline" href={`?historyPage=${history.page + 1}`}>Older changes</Link>}
-          </div>
-        </CardContent>
-      </Card>
+      <Suspense key={`${id}:${historyPage}`} fallback={<Skeleton className="h-48 w-full" role="status" aria-label="Loading lease history" />}>
+        <LeaseHistorySection leaseId={id} page={historyPage} />
+      </Suspense>
     </div>
     </LeaseScopeGate>
   );

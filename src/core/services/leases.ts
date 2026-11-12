@@ -10,14 +10,43 @@ import type {
   OnboardingStage,
   PaymentCadence,
   PaymentMethod,
+  Party,
+  Property,
+  Unit,
+  Obligation,
+  LedgerEntry,
   RentScheduleTranche,
 } from "../types";
 
 export interface LeaseListFilter {
+  /** Explicit server-side scope. An empty array matches no leases. */
+  ids?: string[];
   status?: LeaseStatus[];
   propertyId?: string;
   cadence?: PaymentCadence;
   search?: string;
+}
+
+/** Data needed by the lease table, loaded together by the database adapter. */
+export interface LeaseOverview {
+  lease: Lease;
+  property?: Property;
+  lessor?: Party;
+  lessee?: Party;
+  advisor?: Party;
+  nextRentEntry?: LedgerEntry;
+}
+
+/** A lease and its own relations; relatedLeases contains only its parent
+ * and direct children. Authorization removes inaccessible related leases. */
+export interface LeaseDetails {
+  lease: Lease;
+  property: Property | null;
+  units: Unit[];
+  parties: Party[];
+  obligations: Obligation[];
+  ledger: LedgerEntry[];
+  relatedLeases: Lease[];
 }
 
 /**
@@ -115,7 +144,9 @@ export interface TrancheUpdateInput {
 
 export interface ILeaseService {
   list(filter?: LeaseListFilter): Promise<Lease[]>;
+  listOverview(filter?: LeaseListFilter): Promise<LeaseOverview[]>;
   get(id: string): Promise<Lease | null>;
+  getDetails(id: string): Promise<LeaseDetails | null>;
   create(intent: LeaseCreateIntent): Promise<Lease>;
   updateStatus(id: string, status: LeaseStatus): Promise<Lease>;
   /** Patch a lease's own fields. Throws if the lease doesn't exist. */

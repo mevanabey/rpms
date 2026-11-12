@@ -6,8 +6,8 @@ import { useLeaseEditing } from "./use-lease-edit";
 import { useLeaseViewMode } from "./use-lease-view";
 
 /**
- * Renders either `defaultView` or `detailsView` depending on the per-lease
- * view mode (default = rich layout, details = compact two-column table).
+ * Renders either `cardView` or `listView` depending on the saved browser
+ * preference (List View is the default).
  * Both trees are server-rendered ahead of time and passed in as ReactNode;
  * this client wrapper just picks which one to display.
  *
@@ -16,14 +16,14 @@ import { useLeaseViewMode } from "./use-lease-view";
  */
 export function LeaseViewSwitch({
   leaseId,
-  defaultView,
-  detailsView,
+  cardView,
+  listView,
 }: {
   leaseId: string;
-  defaultView: ReactNode;
-  detailsView: ReactNode;
+  cardView: ReactNode;
+  listView: ReactNode;
 }) {
-  const mode = useLeaseViewMode(leaseId);
+  const mode = useLeaseViewMode();
   const editing = useLeaseEditing(leaseId);
-  return <>{editing || mode === "details" ? detailsView : defaultView}</>;
+  return <>{editing || mode === "list" ? listView : cardView}</>;
 }

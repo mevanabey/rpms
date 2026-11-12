@@ -19,8 +19,8 @@ import type { AppUser } from "@/lib/demo/identity";
  *     round-trips, which on a high-latency link reads as a statement
  *     timeout. 10 connections fit comfortably under the pgbouncer default
  *     pool size and stay polite to the shared pool.
- *   - `idle_timeout: 30` seconds — close idle sockets fast so we don't
- *     hold a connection slot across Next.js dev rebuilds.
+ *   - `idle_timeout` — 30s on Vercel to release serverless connection slots;
+ *     300s locally so browsing between pages doesn't repeatedly reopen sockets.
  *   - `connect_timeout: 10` seconds — fail loud on cold-start, don't hang.
  *   - `connection.statement_timeout` — explicit ceiling so a runaway
  *     query can't burn the whole request budget. 30s is generous for any
@@ -42,7 +42,7 @@ function buildClient(): PostgresJsDatabase<typeof schema> {
     globalThis.__rpms_pg = postgres(process.env.DATABASE_URL, {
       prepare: false,
       max: 10,
-      idle_timeout: 30,
+      idle_timeout: process.env.VERCEL ? 30 : 300,
       connect_timeout: 10,
       onnotice: () => {},
       connection: {

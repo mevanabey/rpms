@@ -1,11 +1,11 @@
 import "server-only";
 import { cache } from "react";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { getAuthUser } from "@/lib/supabase/auth";
 import { rolesFor, type AppUser } from "@/lib/demo/identity";
 import { db } from "@/server/db/client";
-import { lease as leaseTable, leasePartyRoleTable, userRole as userRoleTable } from "@/server/db/schema";
+import { userRole as userRoleTable } from "@/server/db/schema";
 
 const PARTICIPANT_ROLES = {
   lawyer: ["lessor_lawyer", "lessee_lawyer"],
@@ -30,11 +30,15 @@ export const getAccountAccess = cache(async () => {
   const sbUser = await getAuthUser();
   if (!sbUser?.email) return null;
 
-  const [row] = await db
-    .select()
-    .from(userRoleTable)
-    .where(eq(userRoleTable.userId, sbUser.id))
-    .limit(1);
+  // The account and lease scope share one SQL statement. Otherwise every
+  // navigation pays another network round trip after loading its access row.
+  const row = await db.query.userRole.findFirst({
+    where: eq(userRoleTable.userId, sbUser.id),
+    with: {
+      assignments: { columns: { leaseId: true, role: true } },
+      createdLeases: { columns: { id: true } },
+    },
+  });
   return row ? { authUser: sbUser, row } : null;
 });
 
@@ -66,19 +70,8 @@ export const getCurrentAppUser = cache(async (): Promise<AppUser | null> => {
     if (role === "advisor") return [...PARTICIPANT_ROLES.advisor];
     return [];
   });
-  const [assignments, created] = await Promise.all([
-    participantRoles.length
-      ? db
-        .select({ leaseId: leasePartyRoleTable.leaseId })
-        .from(leasePartyRoleTable)
-        .where(and(
-          eq(leasePartyRoleTable.userId, sbUser.id),
-          inArray(leasePartyRoleTable.role, participantRoles),
-        ))
-      : Promise.resolve([]),
-    db.select({ id: leaseTable.id }).from(leaseTable)
-      .where(eq(leaseTable.createdBy, sbUser.id)),
-  ]);
+  const allowedRoles = new Set<string>(participantRoles);
+  const assignments = row.assignments.filter((assignment) => allowedRoles.has(assignment.role));
 
   return {
     id: sbUser.id,
@@ -90,7 +83,7 @@ export const getCurrentAppUser = cache(async (): Promise<AppUser | null> => {
     initials,
     partyId: row.partyId ?? undefined,
     assignedLeaseIds: assignments.map((assignment) => assignment.leaseId),
-    createdLeaseIds: created.map((item) => item.id),
+    createdLeaseIds: row.createdLeases.map((item) => item.id),
   };
 });
 

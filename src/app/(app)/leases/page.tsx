@@ -4,8 +4,6 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import type { LedgerEntry } from "@/core/types";
-import { leasePartyByRole, partyMap, propertyMap } from "@/lib/lookup";
 import { getBackend } from "@/server/container";
 import { requireResource } from "@/lib/auth/authorization";
 import { scopeByLease } from "@/lib/demo/scope";
@@ -16,38 +14,13 @@ import { LeasesTable, type LeaseRow } from "./_components/leases-table";
 export default async function LeasesPage() {
   const user = await requireResource("leases:read");
   const backend = getBackend();
-  const [allLeases, parties, properties, allLedger] = await Promise.all([
-    backend.leases.list(),
-    backend.parties.list(),
-    backend.properties.listProperties(),
-    backend.payments.listLedger({ kind: ["rent"] }),
-  ]);
-  const leases = scopeByLease(user, allLeases, (lease) => lease.id);
-  const visibleIds = new Set(leases.map((lease) => lease.id));
-  const ledger = allLedger.filter((entry) => visibleIds.has(entry.leaseId));
-
-  const partyById = partyMap(parties);
-  const propertyById = propertyMap(properties);
-  const nextRentByLease = new Map<string, LedgerEntry>();
-  for (const e of ledger) {
-    if (e.direction !== "in" || e.paidDate) continue;
-    const cur = nextRentByLease.get(e.leaseId);
-    if (!cur || e.dueDate < cur.dueDate) nextRentByLease.set(e.leaseId, e);
-  }
-  const leaseById = new Map(leases.map((l) => [l.id, l]));
-  const rows: LeaseRow[] = leases.map((lease) => {
-    const parent = lease.parentLeaseId ? leaseById.get(lease.parentLeaseId) : undefined;
-    const parentTenant = parent ? partyById.get(parent.lesseePartyId) : undefined;
+  const overview = scopeByLease(user, await backend.leases.listOverview(), (row) => row.lease.id);
+  const leaseById = new Map(overview.map((row) => [row.lease.id, row]));
+  const rows: LeaseRow[] = overview.map((row) => {
+    const parent = row.lease.parentLeaseId ? leaseById.get(row.lease.parentLeaseId) : undefined;
     return {
-      lease,
-      property: propertyById.get(lease.propertyId),
-      lessor: partyById.get(lease.lessorPartyId),
-      lessee: partyById.get(lease.lesseePartyId),
-      advisor: leasePartyByRole(lease, "advisor", partyById),
-      nextRentEntry: nextRentByLease.get(lease.id),
-      parentLabel: parent
-        ? parentTenant?.displayName ?? propertyById.get(parent.propertyId)?.name ?? parent.id
-        : undefined,
+      ...row,
+      parentLabel: parent ? parent.lessee?.displayName ?? parent.property?.name ?? parent.lease.id : undefined,
     };
   });
 

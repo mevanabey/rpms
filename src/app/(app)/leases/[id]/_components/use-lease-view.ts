@@ -1,41 +1,38 @@
 "use client";
 
-/**
- * Per-lease "view mode" — toggles between the rich default layout (parties,
- * clauses, premises card, KPIs, etc.) and a compact "details" view that lists
- * every captured field in a two-column table followed by the rent + ledger
- * tables. Stored in a tiny Zustand map keyed by lease id so the toggle button
- * (above the progress panel) and the page renderer share state without
- * lifting it through a server component.
- *
- * Default = "default".
- */
+/** Browser-wide lease layout preference, shared across leases and reloads.
+ * The server snapshot always uses List View so localStorage cannot cause a
+ * hydration mismatch. Edit mode overrides the layout without changing it. */
+import { useSyncExternalStore } from "react";
 import { create } from "zustand";
 
-export type LeaseViewMode = "default" | "details";
+import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
+
+export type LeaseViewMode = "list" | "card";
+
+const STORAGE_KEY = "rpms:lease-view-mode";
+const DEFAULT_VIEW: LeaseViewMode = "list";
 
 interface ViewState {
-  mode: Record<string, LeaseViewMode>;
-  setMode: (leaseId: string, value: LeaseViewMode) => void;
-  toggle: (leaseId: string) => void;
+  mode: LeaseViewMode;
+  setMode: (value: LeaseViewMode) => void;
+}
+
+function savedView(): LeaseViewMode {
+  return getLocalStorageValue(STORAGE_KEY) === "card" ? "card" : DEFAULT_VIEW;
 }
 
 export const useLeaseViewStore = create<ViewState>((set) => ({
-  mode: {},
-  setMode: (leaseId, value) =>
-    set((s) => ({ mode: { ...s.mode, [leaseId]: value } })),
-  toggle: (leaseId) =>
-    set((s) => {
-      const current = s.mode[leaseId] ?? "default";
-      return {
-        mode: {
-          ...s.mode,
-          [leaseId]: current === "default" ? "details" : "default",
-        },
-      };
-    }),
+  mode: savedView(),
+  setMode: (mode) => {
+    set({ mode });
+    setLocalStorageValue(STORAGE_KEY, mode);
+  },
 }));
 
-export function useLeaseViewMode(leaseId: string): LeaseViewMode {
-  return useLeaseViewStore((s) => s.mode[leaseId] ?? "default");
+const getSnapshot = () => useLeaseViewStore.getState().mode;
+const getServerSnapshot = () => DEFAULT_VIEW;
+
+export function useLeaseViewMode(): LeaseViewMode {
+  return useSyncExternalStore(useLeaseViewStore.subscribe, getSnapshot, getServerSnapshot);
 }
