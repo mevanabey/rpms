@@ -13,6 +13,6 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
   return <div className="space-y-4">
     <Button variant="ghost" asChild><Link href="/activity">Back to activity</Link></Button>
     <h1 className="text-2xl font-bold">Lease change</h1>
-    <LeaseAuditHistory entries={[entry]} showLease />
+    <LeaseAuditHistory entries={[entry]} showLease defaultOpen />
   </div>;
 }

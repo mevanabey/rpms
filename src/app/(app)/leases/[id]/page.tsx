@@ -337,10 +337,6 @@ export default async function LeaseDetailPage({
         today={today}
       />}
 
-      <Suspense fallback={<Skeleton className="h-48 w-full" role="status" aria-label="Loading team and contacts" />}>
-        <LeaseParticipantsSection lease={lease} parties={parties} canEdit={canEdit} />
-      </Suspense>
-
       {/* Below the progress block, the operator can toggle between Card View and the compact two-column List View. The rent
           schedule + obligations + ledger render in BOTH views below this
           switch. Documents + Lease document also live in both at the bottom. */}
@@ -731,6 +727,9 @@ export default async function LeaseDetailPage({
         units={units}
         readOnly={!canEdit}
       />
+      <Suspense fallback={<Skeleton className="h-48 w-full" role="status" aria-label="Loading team and contacts" />}>
+        <LeaseParticipantsSection lease={lease} parties={parties} canEdit={canEdit} />
+      </Suspense>
       <Suspense key={`${id}:${historyPage}`} fallback={<Skeleton className="h-48 w-full" role="status" aria-label="Loading lease history" />}>
         <LeaseHistorySection leaseId={id} page={historyPage} />
       </Suspense>

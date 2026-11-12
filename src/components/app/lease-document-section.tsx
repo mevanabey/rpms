@@ -7,11 +7,10 @@ import { useMemo, useState } from "react";
 import { ChevronDown, Download, FileCheck2, Send } from "lucide-react";
 import { toast } from "sonner";
 
-import { SectionHeader } from "@/components/app/section-header";
 import { SignaturePad } from "@/components/app/signature-pad";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -126,86 +125,85 @@ export function LeaseDocumentSection({
   const totalSigners = signers.length;
 
   return (
-    <section className="flex flex-col gap-3" data-onborda="lease-document">
-      <SectionHeader
-        title="Lease document"
-        description="Auto-filled from this lease. Preview, download, sign, and send to parties."
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="font-mono text-[11px]">
-              {signedCount} / {totalSigners} signed
-            </Badge>
-            <Button size="sm" variant="outline" onClick={handleDownload} disabled={downloading}>
-              <Download className="size-3.5" />
-              {downloading ? "Preparing…" : "Download .docx"}
-            </Button>
-            {!readOnly && <Button size="sm" onClick={handleSend}>
-              <Send className="size-3.5" /> Send for signature
-            </Button>}
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-expanded={open}
-              aria-label={open ? "Collapse lease document" : "Expand lease document"}
-              onClick={() => setOpen((v) => !v)}
-            >
-              <ChevronDown
-                className={cn("size-4 transition-transform", open && "rotate-180")}
-              />
-            </Button>
-          </div>
-        }
-      />
+    <Card data-onborda="lease-document">
+      <CardHeader className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <CardTitle>Lease document</CardTitle>
+          <CardDescription>Auto-filled from this lease. Preview, download, sign, and send to parties.</CardDescription>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className="font-mono text-[11px]">
+            {signedCount} / {totalSigners} signed
+          </Badge>
+          <Button size="sm" variant="outline" onClick={handleDownload} disabled={downloading}>
+            <Download className="size-3.5" />
+            {downloading ? "Preparing…" : "Download .docx"}
+          </Button>
+          {!readOnly && <Button size="sm" onClick={handleSend}>
+            <Send className="size-3.5" /> Send for signature
+          </Button>}
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-expanded={open}
+            aria-controls={`lease-document-preview-${lease.id}`}
+            aria-label={open ? "Collapse lease document" : "Expand lease document"}
+            onClick={() => setOpen((v) => !v)}
+          >
+            <ChevronDown
+              className={cn("size-4 transition-transform", open && "rotate-180")}
+            />
+          </Button>
+        </div>
+      </CardHeader>
       {open && (
-        <Card>
-          <CardContent className="px-0">
-            <div className={readOnly ? "grid grid-cols-1" : "grid grid-cols-1 lg:grid-cols-[2fr_1fr]"}>
-              <div className="border-b lg:border-r lg:border-b-0">
-                <LeaseDocumentPreview data={data} settings={settings} className="h-[640px]" />
-              </div>
-              {!readOnly && <div className="flex flex-col gap-4 p-4">
-                <div className="flex flex-col gap-1">
-                  <h3 className="flex items-center gap-2 font-medium text-sm">
-                    <FileCheck2 className="size-4" /> Sign as
-                  </h3>
-                  <p className="text-muted-foreground text-xs">
-                    Drop a signature and it lands on the PDF instantly. In production
-                    this is replaced by DropboxSign / DocuSign.
-                  </p>
-                </div>
-                <Select value={signerId} onValueChange={setSignerId}>
-                  <SelectTrigger size="sm">
-                    <SelectValue placeholder="Choose a party…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {signers.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.label}
-                        <span className="ml-2 text-muted-foreground text-[10px] uppercase">
-                          {s.role}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <SignaturePad
-                  width={360}
-                  height={130}
-                  initialDataUrl={activeSig?.dataUrl}
-                  onChange={handleSign}
-                  disabled={!signerId}
-                />
-                {activeSig && (
-                  <p className="text-muted-foreground text-[11px]">
-                    Signed {new Date(activeSig.signedAt).toLocaleString("en-GB")} ·{" "}
-                    {activeSig.by}
-                  </p>
-                )}
-              </div>}
+        <CardContent id={`lease-document-preview-${lease.id}`} className="border-t px-0 pt-4">
+          <div className={readOnly ? "grid grid-cols-1" : "grid grid-cols-1 lg:grid-cols-[2fr_1fr]"}>
+            <div className="border-b lg:border-r lg:border-b-0">
+              <LeaseDocumentPreview data={data} settings={settings} className="h-[640px]" />
             </div>
-          </CardContent>
-        </Card>
+            {!readOnly && <div className="flex flex-col gap-4 p-4">
+              <div className="flex flex-col gap-1">
+                <h3 className="flex items-center gap-2 font-medium text-sm">
+                  <FileCheck2 className="size-4" /> Sign as
+                </h3>
+                <p className="text-muted-foreground text-xs">
+                  Drop a signature and it lands on the PDF instantly. In production
+                  this is replaced by DropboxSign / DocuSign.
+                </p>
+              </div>
+              <Select value={signerId} onValueChange={setSignerId}>
+                <SelectTrigger size="sm">
+                  <SelectValue placeholder="Choose a party…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {signers.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.label}
+                      <span className="ml-2 text-muted-foreground text-[10px] uppercase">
+                        {s.role}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <SignaturePad
+                width={360}
+                height={130}
+                initialDataUrl={activeSig?.dataUrl}
+                onChange={handleSign}
+                disabled={!signerId}
+              />
+              {activeSig && (
+                <p className="text-muted-foreground text-[11px]">
+                  Signed {new Date(activeSig.signedAt).toLocaleString("en-GB")} ·{" "}
+                  {activeSig.by}
+                </p>
+              )}
+            </div>}
+          </div>
+        </CardContent>
       )}
-    </section>
+    </Card>
   );
 }
