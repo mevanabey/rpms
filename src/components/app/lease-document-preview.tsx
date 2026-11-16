@@ -118,16 +118,16 @@ export function LeaseDocumentPreview({
 
         <p className="mt-6 text-justify">{model.sealLine}</p>
         <div className="mt-8 grid grid-cols-2 gap-8">
-          <SignatureCell party={model.lessor} roleLabel="LESSOR" signatures={model.signatures} />
-          <SignatureCell party={model.lessee} roleLabel="LESSEE" signatures={model.signatures} />
+          <SignatureCell party={model.lessor} roleLabel={model.lessorLabel} signatures={model.signatures} />
+          <SignatureCell party={model.lessee} roleLabel={model.lesseeLabel} signatures={model.signatures} />
         </div>
-        <div className="mt-6">
+        {model.showNotary && <div className="mt-6">
           <p className="font-bold text-xs">WITNESSES:</p>
           <p className="mt-2 text-xs">1. ____________________________________________</p>
           <p className="mt-2 text-xs">2. ____________________________________________</p>
           <p className="mt-4 text-xs">____________________________________________</p>
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Notary Public</p>
-        </div>
+        </div>}
       </div>
     </div>
   );

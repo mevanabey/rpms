@@ -1,4 +1,5 @@
 import type { Backend } from "@/core/services";
+import type { SavedChecklist } from "@/core/checklists";
 import type {
   LedgerEntry,
   Lease,
@@ -28,6 +29,7 @@ function freshSeedState() {
     ledger: [...LEDGER, ...derived.ledger] as LedgerEntry[],
     notifications: [...NOTIFICATIONS] as Notification[],
     deletedLeaseIds: new Set<string>(),
+    checklists: new Map<string, SavedChecklist>(),
   };
 }
 
@@ -51,6 +53,15 @@ function addMonthsIsoMock(iso: string, months: number): string {
 
 export const mockBackend: Backend = {
   leases: {
+    async getChecklist(id) {
+      if (!await mockBackend.leases.get(id)) return null;
+      return structuredClone(state.checklists.get(id) ?? null);
+    },
+    async saveChecklist(id, checklist) {
+      if (!await mockBackend.leases.get(id)) throw new Error("Agreement not found.");
+      if (state.checklists.has(id)) throw new Error("This agreement already has its original checklist.");
+      state.checklists.set(id, structuredClone(checklist));
+    },
     async list(filter) {
       let out = state.leases.filter((l) => !state.deletedLeaseIds.has(l.id));
       if (filter?.ids) out = out.filter((lease) => filter.ids!.includes(lease.id));
@@ -541,6 +552,7 @@ export const mockAdmin = {
     state.ledger = next.ledger;
     state.notifications = next.notifications;
     state.deletedLeaseIds = next.deletedLeaseIds;
+    state.checklists = next.checklists;
   },
   /** Empty every collection. The dashboard / leases / rent pages all render
    *  blank until the page is reloaded or the server restarted. */
@@ -553,6 +565,7 @@ export const mockAdmin = {
     state.ledger = [];
     state.notifications = [];
     state.deletedLeaseIds = new Set();
+    state.checklists = new Map();
   },
   counts(): Record<string, number> {
     return {

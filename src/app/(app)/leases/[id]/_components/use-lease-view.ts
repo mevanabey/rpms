@@ -8,7 +8,7 @@ import { create } from "zustand";
 
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 
-export type LeaseViewMode = "list" | "card";
+export type LeaseViewMode = "list" | "card" | "checklist";
 
 const STORAGE_KEY = "rpms:lease-view-mode";
 const DEFAULT_VIEW: LeaseViewMode = "list";
@@ -19,7 +19,8 @@ interface ViewState {
 }
 
 function savedView(): LeaseViewMode {
-  return getLocalStorageValue(STORAGE_KEY) === "card" ? "card" : DEFAULT_VIEW;
+  const saved = getLocalStorageValue(STORAGE_KEY);
+  return saved === "card" || saved === "checklist" ? saved : DEFAULT_VIEW;
 }
 
 export const useLeaseViewStore = create<ViewState>((set) => ({

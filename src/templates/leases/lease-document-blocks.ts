@@ -1,3 +1,4 @@
+import { agreementPeriodMonths as monthsBetween } from "@/lib/agreement-periods";
 /**
  * Pure clause model for the lease document — no rendering dependency.
  *
@@ -40,6 +41,9 @@ export interface LeaseDocModel {
   lessee: DocumentParty;
   signatures?: LeaseDocumentData["signatures"];
   fileBaseName: string;
+  lessorLabel: string;
+  lesseeLabel: string;
+  showNotary: boolean;
 }
 
 // ─────────────────────────────────────────────── value formatting
@@ -64,12 +68,6 @@ function txt(v: string | number | undefined | null): string {
   return String(v);
 }
 
-function monthsBetween(a: string, b: string): number {
-  const x = new Date(a);
-  const y = new Date(b);
-  if (Number.isNaN(x.getTime()) || Number.isNaN(y.getTime())) return 0;
-  return (y.getFullYear() - x.getFullYear()) * 12 + (y.getMonth() - x.getMonth()) + 1;
-}
 
 function termYears(a: string, b: string): number {
   const m = monthsBetween(a, b);
@@ -490,9 +488,56 @@ function commercialBlocks(data: LeaseDocumentData): Block[] {
 
 // ─────────────────────────────────────────────── public model builder
 
+/** A checklist supplies commercial terms, not a full service contract.
+ * Keep this summary separate from the firm's lease precedents. */
+function serviceAgreementBlocks(data: LeaseDocumentData): Block[] {
+  const c = data.clauses;
+  const blocks: Block[] = [];
+  const row = (heading: string, value: string | number | undefined) => {
+    if (value !== undefined && value !== "") blocks.push({ kind: "para", heading: `${heading}:`, text: String(value) });
+  };
+  const side = (value?: string) => value === "lessor" ? "Service Provider" : value === "lessee" ? "Client" : value;
+  row("Service Provider", partyName(data.lessor, BLANK));
+  row("Provider ID / registration", data.lessor.idNumber);
+  row("Provider address", data.lessor.address);
+  row("Client", partyName(data.lessee, BLANK));
+  row("Client ID / registration", data.lessee.idNumber);
+  row("Client address", data.lessee.address);
+  row("Premises", data.property.addressLine);
+  row("Scope of services", c?.serviceScope || "Not specified in the captured terms.");
+  row("Term", `${dt(data.startDate)} to ${dt(data.endDate)}`);
+  row("Payment cadence", data.paymentCadence);
+  blocks.push({ kind: "head", text: "Payment schedule" });
+  for (const t of data.tranches) {
+    row(`${dt(t.startDate)} to ${dt(t.endDate)}`, `${fig(t.monthlyRent)} per month${t.paymentDescription ? `. ${t.paymentDescription}` : ""}`);
+  }
+  if (data.securityDeposit) row("Refundable deposit", fig(data.securityDeposit));
+  if (data.advanceMonths !== undefined) row("Advance payment", `${data.advanceMonths} month(s)`);
+  if (c?.advancePaymentAmount) row("Advance payment amount", fig(c.advancePaymentAmount));
+  row("Deposit credited to", c?.depositRefundTo === "other" ? c.depositRefundOther : side(c?.depositRefundTo));
+  row("Management fees paid by", c?.managementFeesNote || side(c?.managementFeesBy));
+  row("Service charges paid by", c?.serviceChargesNote || side(c?.serviceChargesBy));
+  row("A/C service paid by", c?.acServiceNote || side(c?.acServiceBy));
+  row("A/C service period", c?.acServicePeriod);
+  if (c?.minorRepairsThreshold) row("Minor repairs threshold", fig(c.minorRepairsThreshold));
+  row("Maintenance and cleanliness", c?.maintenanceText);
+  if (c?.handoverDelayPenalty) row("Delay in handover", `${fig(c.handoverDelayPenalty)} per day`);
+  row("Lock-in period", c?.lockInPeriodText || (data.lockInEndDate ? `Until ${dt(data.lockInEndDate)}` : undefined));
+  if (c?.terminationNoticeMonths !== undefined) row("Termination notice", `${c.terminationNoticeMonths} month(s)`);
+  row("Early termination", c?.earlyTerminationPenalty);
+  if (c?.renewalNoticeMonths !== undefined) row("Renewal notice", `${c.renewalNoticeMonths} month(s)`);
+  row("Subletting", c?.sublettingNote || c?.sublettingAllowed);
+  row("Additional charges", c?.additionalCharges);
+  row("Taxes", c?.taxApplicabilityNote || side(c?.taxApplicabilityBy));
+  row("Legal fees", data.legalFees ? fig(data.legalFees) : c?.legalFeesNote);
+  row("Stamp duty", data.stampDuty ? fig(data.stampDuty) : c?.stampDutyNote);
+  return blocks;
+}
+
 export function leaseDocModel(data: LeaseDocumentData, settings?: LeaseDocSettings): LeaseDocModel {
+  const isService = data.agreementLabel === "service_agreement";
   const isResidential = data.purpose === "residential";
-  const title = (settings?.agreementTitleOverride?.trim() || data.agreementTitle).toUpperCase();
+  const title = isService ? "SERVICE AGREEMENT — TERMS SUMMARY" : (settings?.agreementTitleOverride?.trim() || data.agreementTitle).toUpperCase();
   const sealLine = isResidential
     ? `IN WITNESS WHEREOF the duly authorised signatories of the Lessor and the Lessee have set their respective hands hereunto and to three others of the same tenor and date as these presents at ${data.property.city || "Colombo"} on ${dt(data.startDate)}.`
     : "IN WITNESS WHEREOF the Lessor set his hand and the Lessee hath caused the Common Seal to be affixed hereunto and to three others of the same tenor and date as these presents on the day, month and year first above written.";
@@ -500,18 +545,21 @@ export function leaseDocModel(data: LeaseDocumentData, settings?: LeaseDocSettin
   return {
     title,
     subtitle: `${data.property.name}${data.units.length > 0 ? ` · ${data.units.map((u) => u.label).join(", ")}` : ""}`,
-    isDraft: data.isDraft,
-    draftBanner: settings?.draftBannerText?.trim() || DEFAULT_DRAFT_BANNER,
+    isDraft: isService || data.isDraft,
+    draftBanner: isService ? "DRAFT TERMS SUMMARY — complete and review the service agreement before execution." : settings?.draftBannerText?.trim() || DEFAULT_DRAFT_BANNER,
     brandLine: settings?.brandLine?.trim() || DEFAULT_BRAND_LINE,
     brandTagline: settings?.brandTagline?.trim() || DEFAULT_BRAND_TAGLINE,
     footerNote: settings?.footerNote?.trim() || undefined,
-    blocks: isResidential ? residentialBlocks(data) : commercialBlocks(data),
+    blocks: isService ? serviceAgreementBlocks(data) : isResidential ? residentialBlocks(data) : commercialBlocks(data),
     units: data.units,
-    scheduleHeading: isResidential ? "THE FIRST SCHEDULE ABOVE REFERRED TO" : "Demised premises",
-    sealLine,
+    scheduleHeading: isService ? "Service premises" : isResidential ? "THE FIRST SCHEDULE ABOVE REFERRED TO" : "Demised premises",
+    sealLine: isService ? "Service Provider and Client" : sealLine,
+    lessorLabel: isService ? "SERVICE PROVIDER" : "LESSOR",
+    lesseeLabel: isService ? "CLIENT" : "LESSEE",
+    showNotary: !isService,
     lessor: data.lessor,
     lessee: data.lessee,
     signatures: data.signatures,
-    fileBaseName: `${(settings?.agreementTitleOverride?.trim() || data.agreementTitle).replace(/\s+/g, "-").toLowerCase()}-${data.id}`,
+    fileBaseName: `${(isService ? "service-agreement-terms-summary" : settings?.agreementTitleOverride?.trim() || data.agreementTitle).replace(/\s+/g, "-").toLowerCase()}-${data.id}`,
   };
 }

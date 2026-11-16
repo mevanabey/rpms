@@ -17,6 +17,8 @@
 import * as XLSX from "xlsx";
 
 import type { Currency } from "@/core/types";
+import type { ChecklistSource } from "@/core/checklists";
+import { checklistSourceSchema } from "./source-schema";
 
 // ─────────────────────────────────────────────────────── File → Grid
 
@@ -86,6 +88,32 @@ export function parseXlsx(buffer: ArrayBuffer): Grid {
   return recognised ?? grids[0] ?? [];
 }
 
+/** Preserve formatted display values without trimming or dropping empty cells.
+ * All sheets survive, even though the importer consumes one selected sheet. */
+export function parseChecklistSource(buffer: ArrayBuffer, fileName: string): ChecklistSource {
+  if (buffer.byteLength > 10 * 1024 * 1024) throw new Error("Checklist files must be 10 MB or smaller.");
+  if (fileName.toLowerCase().endsWith(".csv")) {
+    return checklistSourceSchema.parse({ version: 1, fileName, importSheetIndex: 0,
+      sheets: [{ name: "Checklist", rows: parseCsv(new TextDecoder().decode(buffer)), merges: [] }] });
+  }
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const sheets = workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name];
+    const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null;
+    if (range && (range.e.r >= 2000 || range.e.c >= 60)) throw new Error("Checklist sheets must fit within 2,000 rows and 60 columns. No rows were imported.");
+    const rows = range ? Array.from({ length: range.e.r + 1 }, (_, r) =>
+      Array.from({ length: range.e.c + 1 }, (_, c) => {
+        const cell = sheet[XLSX.utils.encode_cell({ r, c })];
+        return cell ? (cell.w ?? XLSX.utils.format_cell(cell)) : "";
+      })) : [];
+    return { name, rows, merges: (sheet["!merges"] ?? []).map((m) => ({
+      startRow: m.s.r, startColumn: m.s.c, endRow: m.e.r, endColumn: m.e.c,
+    })) };
+  });
+  const selected = sheets.findIndex((sheet) => looksLikeChecklist(sheet.rows));
+  return checklistSourceSchema.parse({ version: 1, fileName, sheets, importSheetIndex: Math.max(0, selected) });
+}
+
 function stringifyCell(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value.trim();
@@ -140,16 +168,18 @@ export const FIELD_DEFS: FieldDef[] = [
   { key: "premisesAddress", label: "Premises address", match: ["premises address", "premises"] },
   { key: "advisorName", label: "Property Investment Advisor", match: ["property investment advisor", "investment advisor", "advisor name", "advisor"] },
   { key: "ctpLawyer", label: "CTP Lawyer", match: ["ctp lawyer name", "ctp lawyer", "capital trust lawyer"] },
-  { key: "counterpartyLawyer", label: "Landlord's Lawyer", match: ["landlord's lawyer", "lessor's lawyer", "tenant's lawyer", "lessee's lawyer"] },
+  { key: "counterpartyLawyer", label: "Landlord's Lawyer", match: ["service provider's lawyer", "client's lawyer", "landlord's lawyer", "lessor's lawyer", "tenant's lawyer", "lessee's lawyer"] },
+  { key: "serviceScope", label: "Scope of services", match: ["scope of services", "service scope", "services provided"] },
+  { key: "areaSqft", label: "Area (sqft)", match: ["square area", "area (sqft)", "area sqft"] },
   { key: "agreementLabel", label: "Lease / Rent Agreement", match: ["lease/rent agreement", "lease / rent agreement", "agreement type", "type of agreement"] },
-  { key: "lessorName", label: "Lessor's Name & ID", match: ["lessor's name", "landlord's name", "lessor name", "landlord name"] },
-  { key: "lessorAddress", label: "Lessor's Address", match: ["lessor's address", "landlord's address", "lessor's adress", "landlord's adress"] },
-  { key: "lesseeName", label: "Lessee's Name & ID", match: ["lessee's name", "tenant's name", "lessee name", "tenant name"] },
+  { key: "lessorName", label: "Lessor's Name & ID", match: ["service provider's name", "service provider name", "lessor's name", "landlord's name", "lessor name", "landlord name"] },
+  { key: "lessorAddress", label: "Lessor's Address", match: ["service provider's address", "service provider address", "lessor's address", "landlord's address", "lessor's adress", "landlord's adress"] },
+  { key: "lesseeName", label: "Lessee's Name & ID", match: ["client's name", "client name", "lessee's name", "tenant's name", "lessee name", "tenant name"] },
   // Must precede `lesseeAddress` so "lessee's current employer" doesn't fall
   // through to address-shaped matchers (it wouldn't, but order is also the
   // render order in the preview list and "Employer" is logically near name).
   { key: "lesseeEmployer", label: "Lessee's Current Employer", match: ["lessee's current employer", "lessee current employer", "tenant's current employer", "tenant current employer", "current employer", "employer"] },
-  { key: "lesseeAddress", label: "Lessee's Address", match: ["lessee's adress", "lessee's address", "tenant's adress", "tenant's address"] },
+  { key: "lesseeAddress", label: "Lessee's Address", match: ["client's address", "client's adress", "client address", "lessee's adress", "lessee's address", "tenant's adress", "tenant's address"] },
   { key: "propertyName", label: "Apartment name", match: ["apartment name", "property name", "building name", "building"] },
   { key: "unitNo", label: "Unit Nos.", match: ["unit nos", "unit no", "unit number", "unit#"] },
   { key: "term", label: "Lease / Rent Period", match: ["lease/rent period", "lease / rent period", "tenancy period", "lease period", "rent period", "term"] },
@@ -182,6 +212,13 @@ export const FIELD_DEFS: FieldDef[] = [
   { key: "legalFees", label: "Legal fees", match: ["legal fees", "legal fee"] },
   { key: "stampDuty", label: "Stamp duty", match: ["stamp duty"] },
 ];
+
+function matchesField(key: string, pattern: string): boolean {
+  // Broad aliases must not consume "termination" or "Premises/Building name".
+  if (pattern === "term") return /\bterm\b/.test(key);
+  if (pattern === "premises") return key === pattern;
+  return key.includes(pattern);
+}
 
 const FIELD_LABEL_BY_KEY = new Map(FIELD_DEFS.map((f) => [f.key, f.label]));
 export function fieldLabel(key: string): string {
@@ -216,9 +253,12 @@ export interface ScheduleColumn {
   role: ColumnRole;
   currency?: Currency;
   grouping: ColumnGrouping;
+  /** Column actually used by the schedule parser, as opposed to alternatives. */
+  selected?: boolean;
 }
 
 export interface ScheduleTranche {
+  sourceRow?: number;
   startDate: string;
   endDate: string;
   monthlyRent?: { amount: number; currency: Currency };
@@ -228,6 +268,9 @@ export interface ScheduleTranche {
 }
 
 export interface ScheduleBlock {
+  sourceStartRow?: number;
+  sourceDataStartRow?: number;
+  sourceEndRow?: number;
   /** Section heading above the column header row, if any. */
   label?: string;
   /** Heuristic kind. "sub" when the label mentions sub-tenancy / sub-lease. */
@@ -339,6 +382,7 @@ export function extractChecklist(rows: Grid): ExtractedChecklist {
   const fields: Record<string, string> = {};
   const unknown: Array<{ key: string; value: string }> = [];
   const schedules: ScheduleBlock[] = [];
+  const fieldRows: NonNullable<ExtractedChecklist["fieldRows"]> = [];
 
   let i = 0;
   let pendingLabel: string | undefined;
@@ -384,16 +428,18 @@ export function extractChecklist(rows: Grid): ExtractedChecklist {
       continue;
     }
     const key = norm(rawKey);
-    const def = FIELD_DEFS.find((f) => f.match.some((m) => key.includes(m)));
+    const def = FIELD_DEFS.find((f) => f.match.some((m) => matchesField(key, m)));
     if (def) {
-      if (rawValue && !fields[def.key]) fields[def.key] = rawValue;
+      const used = Boolean(rawValue && !fields[def.key]);
+      fieldRows.push({ row: i, key: def.key, used, hasValue: Boolean(rawValue) });
+      if (used) fields[def.key] = rawValue;
     } else if (rawValue) {
       unknown.push({ key: rawKey, value: rawValue });
     }
     i++;
   }
 
-  return { fields, unknown, schedules };
+  return { fields, unknown, schedules, fieldRows };
 }
 
 function readScheduleBlock(
@@ -487,6 +533,7 @@ function readScheduleBlock(
   const periodCol = pickMoneyCol("periodRent");
   const totalCol = pickMoneyCol("totalRent");
   const paymentCol = columns.find((c) => c.role === "paymentMethod");
+  for (const column of columns) column.selected = [monthlyCol, periodCol, totalCol, paymentCol].includes(column) || column.index === 0;
 
   const tranches: ScheduleTranche[] = [];
   let cursor = dataStart;
@@ -503,11 +550,11 @@ function readScheduleBlock(
     if (!range) {
       // Stop if the first column is metadata-looking text (e.g., a field key).
       const key = norm(r[0] ?? "");
-      if (key && FIELD_DEFS.some((f) => f.match.some((m) => key.includes(m)))) break;
+      if (key && FIELD_DEFS.some((f) => f.match.some((m) => matchesField(key, m)))) break;
       cursor++;
       continue;
     }
-    const tr: ScheduleTranche = { ...range };
+    const tr: ScheduleTranche = { ...range, sourceRow: cursor };
     if (monthlyCol) {
       const amt = parseNumber(r[monthlyCol.index] ?? "");
       if (amt) tr.monthlyRent = { amount: amt, currency: monthlyCol.currency ?? "LKR" };
@@ -552,7 +599,7 @@ function readScheduleBlock(
       : "unknown";
 
   return {
-    block: { label, kind, columns, tranches, cadence },
+    block: { label, kind, columns, tranches, cadence, sourceStartRow: headerIdx, sourceDataStartRow: dataStart, sourceEndRow: cursor },
     nextIndex: cursor,
   };
 }
@@ -560,6 +607,8 @@ function readScheduleBlock(
 // ─────────────────────────────────────────────────────── Public exports
 
 export interface ExtractedChecklist {
+  source?: ChecklistSource;
+  fieldRows?: { row: number; key: string; used: boolean; hasValue: boolean }[];
   fields: Record<string, string>;
   unknown: Array<{ key: string; value: string }>;
   schedules: ScheduleBlock[];

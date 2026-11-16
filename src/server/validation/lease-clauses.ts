@@ -1,3 +1,4 @@
+import { AGREEMENT_LABELS } from "@/lib/agreements";
 import { z } from "zod";
 
 /**
@@ -20,6 +21,7 @@ const money = z.object({
 
 export const leaseClausesSchema = z
   .object({
+    serviceScope: z.string().optional(),
     managementFeesBy: responsibleParty.optional(),
     managementFeesNote: z.string().optional(),
     serviceChargesBy: responsibleParty.optional(),
@@ -65,6 +67,7 @@ export type LeaseClausesParsed = z.infer<typeof leaseClausesSchema>;
  */
 export const leaseClausesPatchSchema = z
   .object({
+    serviceScope: z.string().nullable(),
     managementFeesBy: responsibleParty.nullable(),
     managementFeesNote: z.string().nullable(),
     serviceChargesBy: responsibleParty.nullable(),
@@ -133,11 +136,7 @@ export function parseLeaseClauses(
   return result.data;
 }
 
-export const agreementLabelSchema = z.enum([
-  "lease_agreement",
-  "rental_agreement",
-  "other",
-]);
+export const agreementLabelSchema = z.enum(AGREEMENT_LABELS);
 
 export type AgreementLabelParsed = z.infer<typeof agreementLabelSchema>;
 

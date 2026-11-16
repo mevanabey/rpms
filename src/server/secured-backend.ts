@@ -19,6 +19,20 @@ export function secureBackend(backend: Backend, getUser: () => Promise<AppUser> 
     ...backend,
     leases: {
       ...backend.leases,
+      async getChecklist(id) {
+        const user = await getUser();
+        if (!canSeeLease(user, id)) return null;
+        const checklist = await backend.leases.getChecklist(id);
+        if (checklist && !checklist.requiredLeaseIds.every((leaseId) => canSeeLease(user, leaseId))) {
+          throw new Error("This source checklist contains linked agreements that are outside your access.");
+        }
+        return checklist;
+      },
+      // The import action authorizes checklists:manage; attachment authorizes
+      // writes to the existing lease. Newly created import IDs are not yet in
+      // the request-cached identity's createdLeaseIds, so scope those at the
+      // action boundary rather than rejecting the creator here.
+      saveChecklist: audited("Original checklist saved", backend.leases.saveChecklist),
       async list(filter) {
         const user = await getUser();
         const ids = scopedLeaseIds(user, filter?.ids);

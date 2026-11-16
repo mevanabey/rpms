@@ -45,6 +45,7 @@ export function LeaseDetailActions({
   parties: Party[];
 }) {
   const router = useRouter();
+  const instrument = lease.agreementLabel === "service_agreement" ? "agreement" : "lease";
   const { pending: uploading, run: upload } = useSubmission();
   const { pending: exporting, run: exportFile } = useSubmission();
   const { pending: opening, run: openFile } = useSubmission();
@@ -95,8 +96,8 @@ export function LeaseDetailActions({
       // Flip the button right away — refresh just keeps the rest of the
       // page in sync.
       setSignedOverride(true);
-      toast.success("Signed lease uploaded", {
-        description: "The lease is now active.",
+      toast.success(`Signed ${instrument} uploaded`, {
+        description: `The ${instrument} is now active.`,
       });
       router.refresh();
     });
@@ -126,7 +127,7 @@ export function LeaseDetailActions({
     // on "Opening…" while the server fetched the URL.
     const win = window.open("about:blank", "_blank");
     if (!win) {
-      toast.error("Could not open signed lease", {
+      toast.error(`Could not open signed ${instrument}`, {
         description: "Allow popups for this site, then try again.",
       });
       return;
@@ -134,7 +135,7 @@ export function LeaseDetailActions({
       const res = await getSignedLeaseUrlAction(lease.id);
       if (!res.ok) {
         win.close();
-        toast.error("Could not open signed lease", { description: res.error });
+        toast.error(`Could not open signed ${instrument}`, { description: res.error });
         return;
       }
       win.location.href = res.data.url;
@@ -165,6 +166,16 @@ export function LeaseDetailActions({
           <LayoutGrid className="size-3.5" />
           Card View
         </Button>
+        <Button
+          variant={viewMode === "checklist" && !editing ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => setView("checklist")}
+          aria-pressed={viewMode === "checklist" && !editing}
+          disabled={editing}
+        >
+          <FileSpreadsheet className="size-3.5" />
+          Checklist View
+        </Button>
       </ButtonGroup>
       <Button
         variant="outline"
@@ -185,7 +196,7 @@ export function LeaseDetailActions({
         (hasSigned ? (
           <Button variant="outline" size="sm" onClick={openSignedLease} disabled={opening}>
             <FileSignature className="size-3.5" />
-            {opening ? "Opening…" : "View signed lease"}
+            {opening ? "Opening…" : `View signed ${instrument}`}
           </Button>
         ) : (
           <Button
@@ -195,7 +206,7 @@ export function LeaseDetailActions({
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload className="size-3.5" />
-            {uploading ? "Uploading…" : "Upload signed lease"}
+            {uploading ? "Uploading…" : `Upload signed ${instrument}`}
           </Button>
         ))}
       <input

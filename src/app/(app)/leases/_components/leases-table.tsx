@@ -81,6 +81,7 @@ import {
   useCurrentUser,
   useRentReminders,
 } from "@/lib/demo/use-store";
+import { AGREEMENT_LABELS, AGREEMENT_TITLES } from "@/lib/agreements";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import {
   downloadBase64File,
@@ -125,8 +126,8 @@ interface ColumnDef {
 const COLUMNS: ColumnDef[] = [
   { key: "property", label: "Property" },
   { key: "units", label: "Units" },
-  { key: "lessor", label: "Landlord" },
-  { key: "lessee", label: "Tenant" },
+  { key: "lessor", label: "Landlord / Provider" },
+  { key: "lessee", label: "Tenant / Client" },
   { key: "advisor", label: "Advisor" },
   {
     key: "rent",
@@ -185,6 +186,7 @@ const CADENCES: PaymentCadence[] = ["monthly", "quarterly", "biannual"];
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 
 interface Filters {
+  agreements: Set<(typeof AGREEMENT_LABELS)[number]>;
   statuses: Set<LeaseStatus>;
   kinds: Set<LeaseKind>;
   purposes: Set<LeasePurpose>;
@@ -193,6 +195,7 @@ interface Filters {
 }
 
 const EMPTY_FILTERS: Filters = {
+  agreements: new Set(),
   statuses: new Set(),
   kinds: new Set(),
   purposes: new Set(),
@@ -202,6 +205,7 @@ const EMPTY_FILTERS: Filters = {
 
 function filtersAreEmpty(f: Filters): boolean {
   return (
+    f.agreements.size === 0 &&
     f.statuses.size === 0 &&
     f.kinds.size === 0 &&
     f.purposes.size === 0 &&
@@ -262,6 +266,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return scoped.filter((r) => {
+      if (filters.agreements.size > 0 && !filters.agreements.has(r.lease.agreementLabel ?? "lease_agreement")) return false;
       if (filters.statuses.size > 0 && !filters.statuses.has(r.lease.status)) return false;
       if (filters.kinds.size > 0 && !filters.kinds.has(r.lease.kind)) return false;
       if (filters.purposes.size > 0 && !filters.purposes.has(r.lease.purpose)) return false;
@@ -273,6 +278,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
         (r.property?.name.toLowerCase().includes(q) ?? false) ||
         (r.lessor?.displayName.toLowerCase().includes(q) ?? false) ||
         (r.lessee?.displayName.toLowerCase().includes(q) ?? false) ||
+        (r.lease.agreementLabel ? AGREEMENT_TITLES[r.lease.agreementLabel].toLowerCase().includes(q) : false) ||
         r.lease.status.includes(q)
       );
     });
@@ -317,6 +323,7 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
   const clearSelection = () => setSelected(new Set());
 
   const activeFilterCount =
+    filters.agreements.size +
     filters.statuses.size +
     filters.kinds.size +
     filters.purposes.size +
@@ -505,6 +512,13 @@ export function LeasesTable({ rows }: { rows: LeaseRow[] }) {
                 onToggle={(v) =>
                   setFilters({ ...filters, statuses: toggle(filters.statuses, v) })
                 }
+              />
+              <FilterGroup
+                label="Agreement type"
+                values={[...AGREEMENT_LABELS]}
+                active={filters.agreements}
+                formatLabel={(v) => AGREEMENT_TITLES[v]}
+                onToggle={(v) => setFilters({ ...filters, agreements: toggle(filters.agreements, v) })}
               />
               <FilterGroup
                 label="Kind"
@@ -839,6 +853,7 @@ function renderCell(key: ColumnKey, r: LeaseRow): React.ReactNode {
       return (
         <div className="flex flex-col gap-0.5">
           <span>{r.property?.name ?? "—"}</span>
+          {l.agreementLabel === "service_agreement" && <Badge variant="outline" className="w-fit text-[10px]">Service Agreement</Badge>}
           {r.parentLabel && (
             <span className="inline-flex items-center gap-1 text-[11px] text-violet-700 dark:text-violet-300">
               Sub of: <span className="font-medium">{r.parentLabel}</span>
@@ -876,11 +891,13 @@ function FilterGroup<T extends string>({
   values,
   active,
   onToggle,
+  formatLabel = (value) => value,
 }: {
   label: string;
   values: readonly T[];
   active: Set<T>;
   onToggle: (value: T) => void;
+  formatLabel?: (value: T) => string;
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -911,7 +928,7 @@ function FilterGroup<T extends string>({
               >
                 {on && <Check className="size-2.5" />}
               </span>
-              {v}
+              {formatLabel(v)}
             </button>
           );
         })}

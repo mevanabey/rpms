@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { Backend, LeaseListFilter, PaymentListFilter } from "@/core/services";
 import type { AppUser } from "@/lib/demo/identity";
+import type { SavedChecklist } from "@/core/checklists";
 import { scopedLeaseIds } from "@/lib/demo/scope";
 import { mockBackend } from "./adapters/mock";
 import { secureBackend } from "./secured-backend";
@@ -100,4 +101,22 @@ test("mock reads honor explicit empty scopes and retain lease detail relations",
   assert.equal(details?.lease.id, row.lease.id);
   assert.equal(details?.property?.id, row.lease.propertyId);
   assert.ok(details?.relatedLeases.every((lease) => lease.id === row.lease.parentLeaseId || lease.parentLeaseId === row.lease.id));
+});
+
+test("checklist reads require access to the root and every agreement in a paired source", async () => {
+  const checklist: SavedChecklist = {
+    source: { version: 1, fileName: "paired.xlsx", importSheetIndex: 0, sheets: [{ name: "Sheet1", rows: [["Private source"]], merges: [] }] },
+    savedAt: "2026-11-16T00:00:00Z", mode: "imported", requiredLeaseIds: ["master", "sub"], mappings: [],
+  };
+  let calls = 0;
+  const backend: Backend = { ...mockBackend, leases: { ...mockBackend.leases, async getChecklist() { calls++; return checklist; } } };
+  const unassigned = secureBackend(backend, async () => actor());
+  assert.equal(await unassigned.leases.getChecklist("master"), null);
+  assert.equal(calls, 0, "unauthorized roots must not load source cells");
+  const partial = secureBackend(backend, async () => actor({ assignedLeaseIds: ["sub"] }));
+  await assert.rejects(() => partial.leases.getChecklist("sub"), /outside your access/);
+  const assigned = secureBackend(backend, async () => actor({ assignedLeaseIds: ["master", "sub"] }));
+  assert.deepEqual(await assigned.leases.getChecklist("master"), checklist);
+  const admin = secureBackend(backend, async () => actor({ role: "admin" }));
+  assert.deepEqual(await admin.leases.getChecklist("sub"), checklist);
 });

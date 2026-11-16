@@ -1,3 +1,4 @@
+import { agreementPeriodMonths as monthsBetween } from "@/lib/agreement-periods";
 /**
  * Checklist **export** — the mirror image of `parse.ts` / `build-lease.ts`.
  *
@@ -20,6 +21,7 @@
  * borders.
  */
 
+import { agreementFieldLabel } from "@/lib/agreements";
 import * as XLSX from "xlsx";
 
 import type { Lease, Money, Party, Property, Unit } from "@/core/types";
@@ -46,6 +48,7 @@ const DEPOSIT_REFUND: Record<string, string> = {
 
 const AGREEMENT: Record<string, string> = {
   lease_agreement: "Lease Agreement",
+  service_agreement: "Service Agreement",
   rental_agreement: "Rent Agreement",
   other: "Other",
 };
@@ -98,15 +101,6 @@ function joinNote(head: string, note: string | undefined): string {
 }
 
 /** Whole months in [start, end] inclusive, the way the firm counts a period. */
-function monthsBetween(startIso: string, endIso: string): number {
-  const start = new Date(startIso);
-  const end = new Date(endIso);
-  return (
-    (end.getFullYear() - start.getFullYear()) * 12 +
-    (end.getMonth() - start.getMonth()) +
-    1
-  );
-}
 
 /**
  * Rent line the firm writes into the single "Monthly Rental" cell: one figure
@@ -132,6 +126,7 @@ type Row = (string | number)[];
 
 function metadataRows(input: ChecklistExportInput): Row[] {
   const { lease, property, units } = input;
+  const labelFor = (text: string) => agreementFieldLabel(lease.agreementLabel, text);
   const byId = new Map(input.parties.map((p) => [p.id, p]));
   const c = lease.clauses;
   const roles = lease.additionalRoles ?? [];
@@ -158,7 +153,7 @@ function metadataRows(input: ChecklistExportInput): Row[] {
     ],
     ["Property Investment Advisor", roleParty("advisor")?.displayName ?? ""],
     ["CTP Lawyer", c?.ctpLawyerName ?? ""],
-    ["Landlord's Lawyer", counterpartyLawyer?.displayName ?? ""],
+    [labelFor("Landlord's Lawyer"), counterpartyLawyer?.displayName ?? ""],
     [
       "Lease / Rent Agreement",
       lease.agreementLabel === "other"
@@ -167,13 +162,15 @@ function metadataRows(input: ChecklistExportInput): Row[] {
           ? AGREEMENT[lease.agreementLabel]
           : "",
     ],
-    ["Lessor's Name & ID", partyText(lessor)],
-    ["Lessor's Address", lessor?.address ?? ""],
-    ["Lessee's Name & ID", partyText(lessee)],
-    ["Lessee's Current Employer", c?.lesseeEmployer ?? ""],
-    ["Lessee's Address", lessee?.address ?? ""],
+    [labelFor("Lessor's Name & ID"), partyText(lessor)],
+    [labelFor("Lessor's Address"), lessor?.address ?? ""],
+    [labelFor("Lessee's Name & ID"), partyText(lessee)],
+    [labelFor("Lessee's Current Employer"), c?.lesseeEmployer ?? ""],
+    [labelFor("Lessee's Address"), lessee?.address ?? ""],
     ["Apartment name", property?.name ?? ""],
     ["Unit Nos.", leaseUnits.map((u) => u.label).join(", ")],
+    ["Scope of services", c?.serviceScope ?? ""],
+    ["Area (sqft)", leaseUnits.length === 1 ? (leaseUnits[0].areaSqft ?? "") : ""],
     ["Lease / Rent Period", `${dmy(lease.startDate)} to ${dmy(lease.endDate)}`],
     ["Monthly Rental", monthlyRentalText(lease)],
     [
@@ -186,7 +183,7 @@ function metadataRows(input: ChecklistExportInput): Row[] {
     [
       "Applicability of WHT and any other taxes",
       joinNote(
-        c?.taxApplicabilityBy ? RESPONSIBLE[c.taxApplicabilityBy] : "",
+        c?.taxApplicabilityBy ? labelFor(RESPONSIBLE[c.taxApplicabilityBy]) : "",
         c?.taxApplicabilityNote,
       ),
     ],
@@ -216,20 +213,20 @@ function metadataRows(input: ChecklistExportInput): Row[] {
     [
       "Management fees paid by",
       joinNote(
-        c?.managementFeesBy ? RESPONSIBLE[c.managementFeesBy] : "",
+        c?.managementFeesBy ? labelFor(RESPONSIBLE[c.managementFeesBy]) : "",
         c?.managementFeesNote,
       ),
     ],
     [
       "Service charges paid by",
       joinNote(
-        c?.serviceChargesBy ? RESPONSIBLE[c.serviceChargesBy] : "",
+        c?.serviceChargesBy ? labelFor(RESPONSIBLE[c.serviceChargesBy]) : "",
         c?.serviceChargesNote,
       ),
     ],
     [
       "A/C Service by",
-      joinNote(c?.acServiceBy ? RESPONSIBLE[c.acServiceBy] : "", c?.acServiceNote),
+      joinNote(c?.acServiceBy ? labelFor(RESPONSIBLE[c.acServiceBy]) : "", c?.acServiceNote),
     ],
     ["A/C service period", c?.acServicePeriod ?? ""],
     ["Additional Charges", c?.additionalCharges ?? ""],
@@ -245,7 +242,7 @@ function metadataRows(input: ChecklistExportInput): Row[] {
       c?.depositRefundTo === "other"
         ? (c.depositRefundOther ?? "Other")
         : c?.depositRefundTo
-          ? DEPOSIT_REFUND[c.depositRefundTo]
+          ? labelFor(DEPOSIT_REFUND[c.depositRefundTo])
           : "",
     ],
     ["Prior notice of termination", monthsText(c?.terminationNoticeMonths)],
@@ -396,7 +393,7 @@ export function buildLeaseChecklistWorkbook(
   const lessee = input.parties.find((p) => p.id === input.lease.lesseePartyId);
   const subject =
     input.property?.name ?? lessee?.displayName ?? input.lease.id.slice(0, 8);
-  const kind = input.lease.kind === "sub" ? "Sub Lease" : "Lease";
+  const kind = input.lease.agreementLabel === "service_agreement" ? "Service Agreement" : input.lease.kind === "sub" ? "Sub Lease" : "Lease";
 
   return {
     fileName: `Check List - ${kind} - ${safeFileNamePart(subject)} - ${today}.xlsx`,

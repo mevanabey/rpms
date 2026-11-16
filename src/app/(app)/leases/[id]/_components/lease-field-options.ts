@@ -1,3 +1,5 @@
+import { AGREEMENT_LABELS, AGREEMENT_TITLES } from "@/lib/agreements";
+export { AGREEMENT_LABELS } from "@/lib/agreements";
 /**
  * Shared option lists for lease edit mode. Plain module (no "use client") so
  * both server components (which build the details list and its field specs)
@@ -29,12 +31,6 @@ export const PAYMENT_METHODS = [
   "cheque",
 ] as const;
 
-export const AGREEMENT_LABELS = [
-  "lease_agreement",
-  "rental_agreement",
-  "other",
-] as const;
-
 const humanize = (s: string) => s.replace(/_/g, " ");
 
 const toOptions = (values: readonly string[]): EditableOption[] =>
@@ -44,7 +40,7 @@ export const statusOptions = toOptions(LEASE_STATUSES);
 export const purposeOptions = toOptions(LEASE_PURPOSES);
 export const cadenceOptions = toOptions(PAYMENT_CADENCES);
 export const paymentMethodOptions = toOptions(PAYMENT_METHODS);
-export const agreementLabelOptions = toOptions(AGREEMENT_LABELS);
+export const agreementLabelOptions = AGREEMENT_LABELS.map((value) => ({ value, label: AGREEMENT_TITLES[value] }));
 
 export const responsibleOptions: EditableOption[] = [
   { value: "lessor", label: "Landlord" },

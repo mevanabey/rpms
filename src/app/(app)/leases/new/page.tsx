@@ -19,9 +19,9 @@ export default async function NewLeasePage() {
   return (
     <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
       <div>
-        <h1 className="font-bold text-2xl tracking-tight">New lease</h1>
+        <h1 className="font-bold text-2xl tracking-tight">New agreement</h1>
         <p className="mt-1 text-muted-foreground text-sm">
-          One form, one submission — captures every row on the lawyer/handler intake
+          Choose a lease, rental, or service agreement and complete the intake
           checklist. Toggle on a paired sub-tenancy to capture a Master+Sub pair in one go.
         </p>
       </div>

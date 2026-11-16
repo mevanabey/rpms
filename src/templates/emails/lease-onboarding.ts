@@ -1,5 +1,6 @@
 import type { MailMessage } from "@/core/services/mailer";
-import type { Money } from "@/core/types";
+import { agreementFieldLabel } from "@/lib/agreements";
+import type { AgreementLabel, Money } from "@/core/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 /**
@@ -21,6 +22,7 @@ export type LeaseEmailKind = "lawyer" | "advisor" | "accounts";
 
 export interface LeaseEmailContext {
   kind: LeaseEmailKind;
+  agreementLabel?: AgreementLabel;
   /** Short human reference, e.g. "Lucky Seven — Level 4". */
   leaseRef: string;
   propertyName: string;
@@ -67,6 +69,18 @@ const COPY: Record<
   },
 };
 
+function copyFor(ctx: LeaseEmailContext) {
+  const copy = COPY[ctx.kind];
+  if (ctx.agreementLabel !== "service_agreement") return copy;
+  return {
+    subject: (ref: string) => copy.subject(ref).replace("lease agreement", "service agreement"),
+    lead: copy.lead.replace("lease agreement", "service agreement").replace("This lease", "This service agreement"),
+    ask: ctx.kind === "accounts"
+      ? "Please raise the invoice, record the deposit and any applicable stamp duty, and proceed with signing."
+      : copy.ask,
+  };
+}
+
 function money(m: Money | undefined): string {
   if (!m) return "—";
   return formatCurrency(m.amount, { currency: m.currency, noDecimals: true });
@@ -84,17 +98,17 @@ function facts(ctx: LeaseEmailContext): [string, string][] {
   const rows: [string, string][] = [
     ["Property", ctx.propertyName],
     ["Unit(s)", ctx.unitLabels.length ? ctx.unitLabels.join(", ") : "—"],
-    ["Lessor", ctx.lessorName],
-    ["Lessee", ctx.lesseeName],
+    [agreementFieldLabel(ctx.agreementLabel, "Lessor"), ctx.lessorName],
+    [agreementFieldLabel(ctx.agreementLabel, "Lessee"), ctx.lesseeName],
     ["Term", `${formatDate(ctx.startDate)} → ${formatDate(ctx.endDate)}`],
   ];
-  if (ctx.monthlyRent) rows.push(["Monthly rent", money(ctx.monthlyRent)]);
+  if (ctx.monthlyRent) rows.push([ctx.agreementLabel === "service_agreement" ? "Monthly fee" : "Monthly rent", money(ctx.monthlyRent)]);
   if (ctx.securityDeposit) rows.push(["Security deposit", money(ctx.securityDeposit)]);
   return rows;
 }
 
 function renderText(ctx: LeaseEmailContext): string {
-  const copy = COPY[ctx.kind];
+  const copy = copyFor(ctx);
   const width = Math.max(...facts(ctx).map(([k]) => k.length));
   return [
     copy.lead,
@@ -102,8 +116,8 @@ function renderText(ctx: LeaseEmailContext): string {
     ...facts(ctx).map(([k, v]) => `  ${k.padEnd(width)}  ${v}`),
     "",
     ctx.hasAgreement
-      ? "The lease agreement is attached to this email."
-      : "The lease agreement has not been generated yet.",
+      ? "The agreement is attached to this email."
+      : "The agreement has not been uploaded or generated yet.",
     "",
     copy.ask,
     "",
@@ -115,7 +129,7 @@ function renderText(ctx: LeaseEmailContext): string {
 }
 
 function renderHtml(ctx: LeaseEmailContext): string {
-  const copy = COPY[ctx.kind];
+  const copy = copyFor(ctx);
   const rows = facts(ctx)
     .map(
       ([k, v]) =>
@@ -131,10 +145,10 @@ function renderHtml(ctx: LeaseEmailContext): string {
     `<p style="font-size:14px;line-height:1.6;margin:0 0 20px">${escapeHtml(copy.lead)}</p>`,
     `<table style="border-collapse:collapse;border-top:1px solid ${PALETTE.border};border-bottom:1px solid ${PALETTE.border};margin:0 0 20px;width:100%">${rows}</table>`,
     ctx.hasAgreement
-      ? `<p style="font-size:13px;color:${PALETTE.muted};margin:0 0 20px">The lease agreement is attached to this email.</p>`
-      : `<p style="font-size:13px;color:${PALETTE.muted};margin:0 0 20px">The lease agreement has not been generated yet.</p>`,
+      ? `<p style="font-size:13px;color:${PALETTE.muted};margin:0 0 20px">The agreement is attached to this email.</p>`
+      : `<p style="font-size:13px;color:${PALETTE.muted};margin:0 0 20px">The agreement has not been uploaded or generated yet.</p>`,
     `<p style="font-size:14px;line-height:1.6;margin:0 0 20px">${escapeHtml(copy.ask)}</p>`,
-    `<p style="margin:0 0 24px"><a href="${escapeHtml(ctx.leaseUrl)}" style="color:${PALETTE.accent};font-size:14px">View this lease in RPMS →</a></p>`,
+    `<p style="margin:0 0 24px"><a href="${escapeHtml(ctx.leaseUrl)}" style="color:${PALETTE.accent};font-size:14px">View this agreement in RPMS →</a></p>`,
     `<p style="font-size:12px;color:${PALETTE.muted};border-top:1px solid ${PALETTE.border};padding-top:12px;margin:0">Sent by ${escapeHtml(ctx.sender.name)} via RPMS, Capital Trust Properties.</p>`,
     `</div>`,
   ].join("");
@@ -145,7 +159,7 @@ export function buildLeaseEmail(
   ctx: LeaseEmailContext,
 ): Pick<MailMessage, "subject" | "text" | "html" | "replyTo"> {
   return {
-    subject: COPY[ctx.kind].subject(ctx.leaseRef),
+    subject: copyFor(ctx).subject(ctx.leaseRef),
     text: renderText(ctx),
     html: renderHtml(ctx),
     replyTo: ctx.sender.email

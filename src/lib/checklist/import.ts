@@ -6,6 +6,8 @@ import type { Lease, LeasePartyRole, Party, Property, Unit } from "@/core/types"
 import { dayOfMonthOf } from "./build-lease";
 import type { ChecklistIntake, PartyInput, UnitInput } from "./build-lease";
 import type { ChecklistImportResult } from "./result";
+import { extractChecklist } from "./parse";
+import { buildChecklistMappings } from "./mappings";
 
 interface Counters {
   created: number;
@@ -55,6 +57,7 @@ async function findOrCreateUnit(
     label: input.label,
     type: input.type,
     bedrooms: input.bedrooms,
+    areaSqft: input.areaSqft,
     status: "reserved",
   });
   c.created++;
@@ -166,6 +169,7 @@ export async function importChecklistToBackend(
     defaultPaymentMethod: intake.lease.defaultPaymentMethod,
     startDate: intake.lease.startDate,
     endDate: intake.lease.endDate,
+    lockInEndDate: intake.lease.lockInEndDate,
     advanceMonths: intake.lease.advanceMonths,
     occupancyCap: intake.lease.occupancyCap,
     securityDeposit: intake.lease.securityDeposit,
@@ -199,6 +203,19 @@ export async function importChecklistToBackend(
       importMeta: { source: "checklist-upload", fields: intake.rawFields, paired: true },
     });
     c.created++;
+  }
+
+  if (intake.source) {
+    const source = intake.source;
+    const checklist = {
+      source,
+      savedAt: new Date().toISOString(),
+      mode: "imported" as const,
+      requiredLeaseIds: [lease.id, ...(subLease ? [subLease.id] : [])],
+      mappings: buildChecklistMappings(source, extractChecklist(source.sheets[source.importSheetIndex].rows), intake),
+    };
+    await backend.leases.saveChecklist(lease.id, checklist);
+    if (subLease) await backend.leases.saveChecklist(subLease.id, checklist);
   }
 
   return {

@@ -45,7 +45,7 @@ import { db, withAudit } from "@/server/db/client";
 import { ledgerEntry as ledgerEntryTable, party as partyTable, userRole as userRoleTable } from "@/server/db/schema";
 import { eq, inArray, sql } from "drizzle-orm";
 import { toParty } from "@/server/adapters/supabase/mappers";
-import { leaseClausesPatchSchema } from "@/server/validation/lease-clauses";
+import { agreementLabelSchema, leaseClausesPatchSchema } from "@/server/validation/lease-clauses";
 import { getMailer } from "@/server/mail";
 import { resolveLeaseRecipients } from "@/server/mail/lease-recipients";
 import { buildLeaseEmail } from "@/templates/emails/lease-onboarding";
@@ -239,9 +239,7 @@ const leaseCreateSchema = z
     parentLeaseId: z.string().uuid().optional(),
     kind: z.enum(["head", "sub"]),
     purpose: z.enum(["commercial", "residential", "bpo"]),
-    agreementLabel: z
-      .enum(["lease_agreement", "rental_agreement", "other"])
-      .optional(),
+    agreementLabel: agreementLabelSchema.optional(),
     agreementLabelOther: z.string().optional(),
     status: z
       .enum(["draft", "signed", "active", "grace", "terminated", "expired", "renewed"])
@@ -277,9 +275,7 @@ const leaseUpdateSchema = z
     lessorPartyId: z.string().uuid().optional(),
     lesseePartyId: z.string().uuid().optional(),
     purpose: z.enum(["commercial", "residential", "bpo"]).optional(),
-    agreementLabel: z
-      .enum(["lease_agreement", "rental_agreement", "other"])
-      .nullish(),
+    agreementLabel: agreementLabelSchema.nullish(),
     agreementLabelOther: z.string().nullish(),
     status: z
       .enum(["draft", "signed", "active", "grace", "terminated", "expired", "renewed"])
@@ -825,6 +821,7 @@ export async function sendLeaseEmailAction(
     const attachments = await loadAgreementAttachment(lease);
     const body = buildLeaseEmail({
       kind,
+      agreementLabel: lease.agreementLabel,
       leaseRef: leaseRef(lease, property, units),
       propertyName: property?.name ?? "—",
       unitLabels: units.filter((u) => lease.unitIds.includes(u.id)).map((u) => u.label),

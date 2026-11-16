@@ -1,3 +1,4 @@
+import { agreementPeriodMonths as monthsBetween } from "@/lib/agreement-periods";
 /**
  * Fills the firm's tagged `.docx` templates with lease data and produces a
  * downloadable Word file.
@@ -40,12 +41,6 @@ function fmtDate(iso: string | undefined): string {
   return d.toLocaleDateString("en-GB", { year: "numeric", month: "long", day: "2-digit" });
 }
 
-function monthsBetween(a: string, b: string): number {
-  const x = new Date(a);
-  const y = new Date(b);
-  if (Number.isNaN(x.getTime()) || Number.isNaN(y.getTime())) return 0;
-  return (y.getFullYear() - x.getFullYear()) * 12 + (y.getMonth() - x.getMonth()) + 1;
-}
 
 function scale(m: { amount: number; currency: string } | undefined, factor: number) {
   return m ? { amount: m.amount * factor, currency: m.currency } : undefined;
@@ -204,6 +199,11 @@ export function buildDataDict(data: LeaseDocumentData): Record<string, string> {
 export async function renderLeaseFromTemplate(
   data: LeaseDocumentData,
 ): Promise<Uint8Array> {
+  if (data.agreementLabel === "service_agreement") {
+    const { buildLeaseDocxBlob } = await import("./lease-docx");
+    const blob = await buildLeaseDocxBlob(data);
+    return new Uint8Array(await blob.arrayBuffer());
+  }
   const purpose: "residential" | "commercial" = data.purpose === "residential" ? "residential" : "commercial";
   const res = await fetch(TEMPLATE_URLS[purpose]);
   if (!res.ok) throw new Error(`Lease template ${purpose} not found (HTTP ${res.status}).`);

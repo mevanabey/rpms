@@ -118,7 +118,7 @@ export type ResponsibleParty = "lessor" | "lessee" | "shared" | "other";
 export type SublettingMode = "no" | "with_consent" | "to_group" | "yes";
 
 /** The label the lawyer/handler put on the instrument at intake. */
-export type AgreementLabel = "lease_agreement" | "rental_agreement" | "other";
+export type AgreementLabel = "lease_agreement" | "rental_agreement" | "service_agreement" | "other";
 
 /** Who the security deposit gets refunded to at end-of-term. */
 export type DepositRefundTo = "lessee" | "lessor" | "other";
@@ -129,6 +129,8 @@ export type DepositRefundTo = "lessee" | "lessor" | "other";
  * leave different rows blank. The lease detail page hides empty entries.
  */
 export interface LeaseClauses {
+  /** Description of the services covered by a service agreement. */
+  serviceScope?: string;
   managementFeesBy?: ResponsibleParty;
   managementFeesNote?: string;
   serviceChargesBy?: ResponsibleParty;
@@ -189,11 +191,13 @@ export interface Lease {
   id: string;
   propertyId: string;
   unitIds: string[];
+  /** Lessor, or service provider for a service agreement. */
   lessorPartyId: string;
+  /** Lessee, or client for a service agreement. */
   lesseePartyId: string;
   kind: LeaseKind;
   purpose: LeasePurpose;
-  /** How the intake labelled the instrument: lease vs rental agreement. */
+  /** Instrument type; service agreements use provider/client party labels. */
   agreementLabel?: AgreementLabel;
   agreementLabelOther?: string;
   startDate: string;

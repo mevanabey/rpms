@@ -177,10 +177,12 @@ export function buildLeaseDocument(data: LeaseDocumentData, settings?: LeaseDocS
       borders: noBorders(),
       rows: [
         new TableRow({
-          children: [signatureCell(model.lessor, "LESSOR", model), signatureCell(model.lessee, "LESSEE", model)],
+          children: [signatureCell(model.lessor, model.lessorLabel, model), signatureCell(model.lessee, model.lesseeLabel, model)],
         }),
       ],
     }),
+  );
+  if (model.showNotary) body.push(
     new Paragraph({ spacing: { before: 240 }, children: [new TextRun({ text: "WITNESSES:", bold: true })] }),
     new Paragraph({ spacing: { before: 120 }, children: [new TextRun({ text: "1. ____________________________________________" })] }),
     new Paragraph({ spacing: { before: 120 }, children: [new TextRun({ text: "2. ____________________________________________" })] }),

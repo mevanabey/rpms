@@ -2,6 +2,7 @@
 
 import { useSubmission } from "@/hooks/use-submission";
 
+import { agreementFieldLabel } from "@/lib/agreements";
 import { useMemo, useState } from "react";
 
 import { ChevronDown, Download, FileCheck2, Send } from "lucide-react";
@@ -128,8 +129,8 @@ export function LeaseDocumentSection({
     <Card data-onborda="lease-document">
       <CardHeader className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <CardTitle>Lease document</CardTitle>
-          <CardDescription>Auto-filled from this lease. Preview, download, sign, and send to parties.</CardDescription>
+          <CardTitle>{lease.agreementLabel === "service_agreement" ? "Service agreement document" : "Lease document"}</CardTitle>
+          <CardDescription>Auto-filled from this agreement. Preview, download, sign, and send to parties.</CardDescription>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="font-mono text-[11px]">
@@ -181,7 +182,7 @@ export function LeaseDocumentSection({
                     <SelectItem key={s.id} value={s.id}>
                       {s.label}
                       <span className="ml-2 text-muted-foreground text-[10px] uppercase">
-                        {s.role}
+                        {agreementFieldLabel(lease.agreementLabel, s.role)}
                       </span>
                     </SelectItem>
                   ))}

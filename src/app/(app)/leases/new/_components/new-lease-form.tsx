@@ -71,6 +71,8 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { AGREEMENT_LABELS, agreementFieldLabel, agreementPartyLabels } from "@/lib/agreements";
+
 import type {
   AgreementLabel,
   Lease,
@@ -109,7 +111,7 @@ import { PropertyPicker } from "@/components/app/forms/property-picker";
 const currency = z.enum(["LKR", "USD"]);
 const responsible = z.enum(["lessor", "lessee", "shared", "other"]);
 const subletting = z.enum(["no", "with_consent", "to_group", "yes"]);
-const agreementLabel = z.enum(["lease_agreement", "rental_agreement", "other"]);
+const agreementLabel = z.enum(AGREEMENT_LABELS);
 const depositRefundTo = z.enum(["lessee", "lessor", "other"]);
 const kind = z.enum(["head", "sub"]);
 const purpose = z.enum(["commercial", "residential", "bpo"]);
@@ -206,6 +208,7 @@ const schema = z
     acServiceNote: z.string().optional(),
     sublettingAllowed: subletting.optional(),
     sublettingNote: z.string().optional(),
+    serviceScope: z.string().optional(),
     maintenanceText: z.string().optional(),
     earlyTerminationPenalty: z.string().optional(),
 
@@ -376,6 +379,7 @@ export function NewLeaseForm({
       acServiceNote: "",
       sublettingAllowed: undefined,
       sublettingNote: "",
+      serviceScope: "",
       maintenanceText: "",
       earlyTerminationPenalty: "",
       tranches: [
@@ -404,6 +408,7 @@ export function NewLeaseForm({
   const watchedLessorId = useWatch({ control: form.control, name: "lessorPartyId" });
   const watchedLesseeId = useWatch({ control: form.control, name: "lesseePartyId" });
   const watchedAgreementLabel = useWatch({ control: form.control, name: "agreementLabel" });
+  const partyLabels = agreementPartyLabels(watchedAgreementLabel);
   const watchedDepositRefundTo = useWatch({ control: form.control, name: "depositRefundTo" });
   const watchedHasSubtenancy = useWatch({ control: form.control, name: "hasSubtenancy" });
   const watchedSubTenantId = useWatch({ control: form.control, name: "sub.tenantPartyId" });
@@ -658,7 +663,7 @@ export function NewLeaseForm({
               name="agreementLabel"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Agreement label</FormLabel>
+                  <FormLabel>Agreement type</FormLabel>
                   <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
@@ -668,6 +673,7 @@ export function NewLeaseForm({
                     <SelectContent>
                       <SelectItem value="lease_agreement">Lease Agreement</SelectItem>
                       <SelectItem value="rental_agreement">Rental Agreement</SelectItem>
+                      <SelectItem value="service_agreement">Service Agreement</SelectItem>
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
@@ -718,6 +724,18 @@ export function NewLeaseForm({
             )}
           </div>
         </SectionCard>
+
+        {watchedAgreementLabel === "service_agreement" && (
+          <SectionCard icon={FileSignature} title="Services" description="Describe the services covered by this agreement.">
+            <FormField control={form.control} name="serviceScope" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Scope of services</FormLabel>
+                <FormControl><Textarea rows={4} placeholder="Enter the agreed services and any exclusions." {...field} /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+          </SectionCard>
+        )}
 
         {/* ───── 2. Premises */}
         <SectionCard
@@ -835,11 +853,11 @@ export function NewLeaseForm({
         <SectionCard
           icon={Users}
           title="Parties"
-          description="Landlord and Tenant — both required."
+          description={`${partyLabels.lessor} and ${partyLabels.lessee} — both required.`}
         >
           <div className="grid gap-4 md:grid-cols-2">
             <PartyBlock
-              label="Landlord"
+              label={partyLabels.lessor}
               partyIdName="lessorPartyId"
               addressName="lessorAddress"
               parties={parties}
@@ -847,7 +865,7 @@ export function NewLeaseForm({
               form={form}
             />
             <PartyBlock
-              label="Tenant"
+              label={partyLabels.lessee}
               partyIdName="lesseePartyId"
               addressName="lesseeAddress"
               parties={parties}
@@ -903,7 +921,7 @@ export function NewLeaseForm({
               name="lessorLawyerPartyId"
               userName="lessorLawyerUserId"
               role="lawyer"
-              label="Landlord's Lawyer"
+              label={`${partyLabels.lessor}'s Lawyer`}
               parties={parties}
               draftParties={draftParties}
               staff={staff}
@@ -1020,7 +1038,7 @@ export function NewLeaseForm({
                       {DEPOSIT_REFUND_OPTIONS.map((o) =>
                         o.value ? (
                           <SelectItem key={o.value} value={o.value}>
-                            {o.label}
+                            {agreementFieldLabel(watchedAgreementLabel, o.label)}
                           </SelectItem>
                         ) : null,
                       )}
@@ -1227,7 +1245,7 @@ export function NewLeaseForm({
                             className="flex items-center gap-2 text-sm"
                           >
                             <RadioGroupItem value={o.value} />
-                            {o.label}
+                            {agreementFieldLabel(watchedAgreementLabel, o.label)}
                           </label>
                         ) : null,
                       )}
@@ -1680,6 +1698,7 @@ function assembleClauses(values: FormValues) {
       currency: values.minorRepairsThresholdCurrency,
     };
   }
+  if (values.agreementLabel === "service_agreement" && values.serviceScope) c.serviceScope = values.serviceScope;
   if (values.maintenanceText) c.maintenanceText = values.maintenanceText;
   if (values.handoverDelayPenaltyAmount && values.handoverDelayPenaltyAmount > 0) {
     c.handoverDelayPenalty = {
@@ -1914,6 +1933,7 @@ function ResponsibilityRow({
   noteName: "managementFeesNote" | "serviceChargesNote" | "acServiceNote";
   label: string;
 }) {
+  const watchedAgreementLabel = useWatch({ control: form.control, name: "agreementLabel" });
   return (
     <div className="grid gap-3 md:grid-cols-[1fr_2fr]">
       <FormField
@@ -1932,7 +1952,7 @@ function ResponsibilityRow({
                 {RESPONSIBLE_OPTIONS.map((o) =>
                   o.value ? (
                     <SelectItem key={o.value} value={o.value}>
-                      {o.label}
+                      {agreementFieldLabel(watchedAgreementLabel, o.label)}
                     </SelectItem>
                   ) : null,
                 )}
@@ -1952,7 +1972,7 @@ function ResponsibilityRow({
             </FormLabel>
             <FormControl>
               <Input
-                placeholder="e.g. Tenant at its cost throughout the tenancy."
+                placeholder="Describe the responsibility and any conditions."
                 {...field}
               />
             </FormControl>

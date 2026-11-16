@@ -1,5 +1,6 @@
 "use client";
 
+import { agreementFieldLabel } from "@/lib/agreements";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSubmission } from "@/hooks/use-submission";
@@ -63,7 +64,7 @@ export function LeaseParticipants({ lease, parties, staff, canEdit }: {
           const assigned = roles.filter((item) => item.role === position.role);
           return (
             <div key={position.role} className="space-y-2 rounded-md border p-3">
-              <div className="font-medium text-sm">{position.label}</div>
+              <div className="font-medium text-sm">{agreementFieldLabel(lease.agreementLabel, position.label)}</div>
               {assigned.length === 0 && <p className="text-xs text-muted-foreground">Not assigned</p>}
               {assigned.map((person) => {
                 const party = byParty.get(person.partyId);
@@ -83,7 +84,7 @@ export function LeaseParticipants({ lease, parties, staff, canEdit }: {
               })}
               {canEdit && (
                 <>
-                  <p className="text-xs font-medium">Add {position.label.toLowerCase()}</p>
+                  <p className="text-xs font-medium">Add {agreementFieldLabel(lease.agreementLabel, position.label).toLowerCase()}</p>
                   <div className={saving ? "pointer-events-none opacity-50" : ""}>
                     <StaffOrContactSelect role={position.userRole} value=""
                       onChange={(partyId, userId) => void replace(position.role, undefined, partyId, userId)}

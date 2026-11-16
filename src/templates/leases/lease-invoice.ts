@@ -124,6 +124,7 @@ function periodForDueDate(lease: LeaseDocumentData, dueDate?: string): { start: 
 }
 
 export function buildInvoiceDocument(lease: LeaseDocumentData, ctx: InvoiceContext = {}): Document {
+  const isService = lease.agreementLabel === "service_agreement";
   const isOverdue = Boolean(ctx.isOverdue);
   const heading = isOverdue ? "DISCONNECTION NOTICE" : "INVOICE";
   const headingColor = isOverdue ? ACCENT_RED : INK;
@@ -147,7 +148,7 @@ export function buildInvoiceDocument(lease: LeaseDocumentData, ctx: InvoiceConte
     .filter(Boolean)
     .join(", ");
 
-  const rentDescription = `Rent — ${lease.property.name}${
+  const rentDescription = `${isService ? "Service fee" : "Rent"} — ${lease.property.name}${
     lease.units.length > 0 ? ` (${unitsText})` : ""
   }${period ? ` · ${fmtDate(period.start)} to ${fmtDate(period.end)}` : ""}`;
 
@@ -280,7 +281,7 @@ export function buildInvoiceDocument(lease: LeaseDocumentData, ctx: InvoiceConte
         kvRow("Billing period", periodText),
         kvRow("Property", `${lease.property.name}${propertyAddress ? ` — ${propertyAddress}` : ""}`),
         kvRow("Unit(s)", unitsText),
-        kvRow("Lease reference", lease.id),
+        kvRow(isService ? "Agreement reference" : "Lease reference", lease.id),
         kvRow("Currency", currencyCode),
       ],
     }),
@@ -356,7 +357,7 @@ export function buildInvoiceDocument(lease: LeaseDocumentData, ctx: InvoiceConte
       spacing: { after: 60 },
       children: [
         new TextRun({
-          text: "Please remit by bank transfer to the account designated under the lease agreement.",
+          text: "Please remit by bank transfer to the account designated under the agreement.",
         }),
       ],
     }),
@@ -387,7 +388,7 @@ export function buildInvoiceDocument(lease: LeaseDocumentData, ctx: InvoiceConte
       children: [
         new TextRun({
           text: isOverdue
-            ? "Payment is overdue. Failure to settle this invoice by return may result in disconnection of services and recovery action as provided in the lease agreement. Late-payment interest may accrue at the contractual rate."
+            ? "Payment is overdue. Failure to settle this invoice by return may result in disconnection of services and recovery action as provided in the agreement. Late-payment interest may accrue at the contractual rate."
             : "Payment is due by the date stated above. Late settlement may attract interest at the contractual rate. All amounts are in the currency stated under Invoice Details.",
           color: isOverdue ? ACCENT_RED : INK,
         }),

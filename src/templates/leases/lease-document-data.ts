@@ -57,6 +57,7 @@ export interface LeaseDocumentData {
   id: string;
   isDraft: boolean;
   agreementTitle: string;
+  agreementLabel?: AgreementLabel;
   kind: LeaseKind;
   purpose: LeasePurpose;
   property: { name: string; addressLine: string; city?: string; lotNo?: string; planNo?: string; perches?: number };
@@ -95,6 +96,7 @@ export function fromLease(
   return {
     id: lease.id,
     isDraft: false,
+    agreementLabel: lease.agreementLabel,
     agreementTitle: agreementTitleFor(lease.agreementLabel, lease.kind, lease.purpose),
     kind: lease.kind,
     purpose: lease.purpose,
@@ -199,6 +201,7 @@ export function fromDraftIntent(
   return {
     id: draftId,
     isDraft: true,
+    agreementLabel: i.agreementLabel,
     agreementTitle: agreementTitleFor(i.agreementLabel, kind, purpose),
     kind,
     purpose,
@@ -274,6 +277,7 @@ function agreementTitleFor(
   kind: LeaseKind,
   purpose: LeasePurpose,
 ): string {
+  if (label === "service_agreement") return "Service Agreement";
   if (label === "rental_agreement") return "Rental Agreement";
   if (label === "other") return "Tenancy Agreement";
   if (kind === "head") return "Indenture of Lease";

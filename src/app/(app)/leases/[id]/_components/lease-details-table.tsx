@@ -13,6 +13,7 @@
  * (`editOnly`), so an empty lease can still be filled in field by field
  * without the read view turning into a wall of dashes.
  */
+import { agreementFieldLabel } from "@/lib/agreements";
 import type { ReactNode } from "react";
 
 import { LeaseStatusBadge } from "@/components/app/status-badge";
@@ -56,6 +57,7 @@ const DEPOSIT_REFUND: Record<string, string> = {
 
 const AGREEMENT: Record<string, string> = {
   lease_agreement: "Lease Agreement",
+  service_agreement: "Service Agreement",
   rental_agreement: "Rental Agreement",
   other: "Other",
 };
@@ -90,6 +92,9 @@ export function LeaseDetailsTable({
   property?: Property;
   units: Unit[];
 }) {
+  const labelFor = (text: string) => agreementFieldLabel(lease.agreementLabel, text);
+  const responsibleChoices = responsibleOptions.map((o) => ({ ...o, label: labelFor(o.label) }));
+  const depositChoices = depositRefundOptions.map((o) => ({ ...o, label: labelFor(o.label) }));
   const byId = partyMap(parties);
   const lessor = byId.get(lease.lessorPartyId);
   const lessee = byId.get(lease.lesseePartyId);
@@ -104,7 +109,7 @@ export function LeaseDetailsTable({
     spec: LeaseFieldSpec,
     display: ReactNode,
   ): ReactNode => (
-    <LeaseFieldCell leaseId={lease.id} label={label} field={spec}>
+    <LeaseFieldCell leaseId={lease.id} label={labelFor(label)} field={spec}>
       {display}
     </LeaseFieldCell>
   );
@@ -184,12 +189,12 @@ export function LeaseDetailsTable({
           control: {
             kind: "select",
             value: by ?? null,
-            options: responsibleOptions,
+            options: responsibleChoices,
             clearable: true,
           },
           save: { on: "clause", field: byField },
         },
-        by ? RESPONSIBLE[by] : "—",
+        by ? labelFor(RESPONSIBLE[by]) : "—",
       ),
     },
     {
@@ -262,6 +267,25 @@ export function LeaseDetailsTable({
         },
         unitLabels || "—",
       ),
+    },
+    {
+      label: "Area (sqft)",
+      value: lease.unitIds.length > 0 ? (
+        <div className="space-y-1">
+          {lease.unitIds.map((id) => {
+            const unit = units.find((item) => item.id === id);
+            const area = unit?.areaSqft;
+            return (
+              <div key={id}>
+                {lease.unitIds.length > 1 && `${unit?.label ?? id}: `}
+                {typeof area === "number" && Number.isFinite(area) && area > 0
+                  ? `${area.toLocaleString("en-US")} sqft`
+                  : "Not captured"}
+              </div>
+            );
+          })}
+        </div>
+      ) : "Not captured",
     },
     {
       label: "Occupancy cap",
@@ -685,12 +709,12 @@ export function LeaseDetailsTable({
           control: {
             kind: "select",
             value: c?.depositRefundTo ?? null,
-            options: depositRefundOptions,
+            options: depositChoices,
             clearable: true,
           },
           save: { on: "clause", field: "depositRefundTo" },
         },
-        c?.depositRefundTo ? DEPOSIT_REFUND[c.depositRefundTo] : "—",
+        c?.depositRefundTo ? labelFor(DEPOSIT_REFUND[c.depositRefundTo]) : "—",
       ),
     },
     {
@@ -853,10 +877,20 @@ export function LeaseDetailsTable({
     },
   ];
 
+  if (lease.agreementLabel === "service_agreement") {
+    rows.unshift({
+      label: "Scope of services",
+      value: editable("Scope of services", {
+        control: { kind: "textarea", value: c?.serviceScope ?? null },
+        save: { on: "clause", field: "serviceScope" },
+      }, c?.serviceScope || "Not specified"),
+    });
+  }
+
   return (
     <Card>
       <CardContent className="px-0">
-        <LeaseDetailsRows leaseId={lease.id} rows={rows} />
+        <LeaseDetailsRows leaseId={lease.id} rows={rows.map((row) => ({ ...row, label: labelFor(row.label) }))} />
       </CardContent>
     </Card>
   );

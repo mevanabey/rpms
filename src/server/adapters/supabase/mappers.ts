@@ -241,7 +241,11 @@ function parseImportMeta(
 ): Record<string, unknown> | undefined {
   if (raw === null || raw === undefined) return undefined;
   if (typeof raw === "object" && !Array.isArray(raw)) {
-    return raw as Record<string, unknown>;
+    // Full source is fetched separately with its own access check, including
+    // access to both agreements when a checklist created a master/sub pair.
+    const metadata = { ...raw } as Record<string, unknown>;
+    delete metadata.checklist;
+    return metadata;
   }
   return undefined;
 }

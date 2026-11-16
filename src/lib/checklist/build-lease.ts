@@ -23,9 +23,12 @@ import type {
 } from "@/core/types";
 
 import type { ExtractedChecklist, ScheduleBlock } from "./parse";
+import type { ChecklistSource } from "@/core/checklists";
 
 export interface ChecklistFields {
   premisesAddress?: string;
+  serviceScope?: string;
+  areaSqft?: string;
   advisorName?: string;
   ctpLawyer?: string;
   counterpartyLawyer?: string;
@@ -75,6 +78,7 @@ export interface UnitInput {
   label: string;
   type: "office" | "apartment" | "storage" | "penthouse" | "floor";
   bedrooms?: number;
+  areaSqft?: number;
 }
 
 export interface LeaseShape {
@@ -83,6 +87,7 @@ export interface LeaseShape {
   agreementLabel?: AgreementLabel;
   startDate: string;
   endDate: string;
+  lockInEndDate?: string;
   status: "draft";
   paymentCadence: PaymentCadence;
   defaultPaymentMethod: PaymentMethod;
@@ -112,6 +117,7 @@ export interface SubLeaseIntake {
 }
 
 export interface ChecklistIntake {
+  source?: ChecklistSource;
   property: { name: string; addressLine: string; city: string };
   units: UnitInput[];
   lessor: PartyInput;
@@ -353,6 +359,7 @@ export function parseAgreementLabel(raw: string | undefined): AgreementLabel | u
   // sub-lease checklist) maps to rental_agreement, while "Indenture of
   // Lease" still wins for lease_agreement when both terms appear.
   const s = raw.toLowerCase();
+  if (/\bservice\s+agreement\b/.test(s)) return "service_agreement";
   if (/\blease\b/.test(s)) return "lease_agreement";
   if (/\brent(?:al)?\b|\btenancy\b/.test(s)) return "rental_agreement";
   return "other";
@@ -361,8 +368,8 @@ export function parseAgreementLabel(raw: string | undefined): AgreementLabel | u
 export function parseResponsibleParty(raw: string | undefined): ResponsibleParty | undefined {
   if (!raw) return undefined;
   const s = raw.toLowerCase();
-  if (s.includes("lessor") || s.includes("landlord")) return "lessor";
-  if (s.includes("lessee") || s.includes("tenant")) return "lessee";
+  if (s.includes("lessor") || s.includes("landlord") || s.includes("service provider")) return "lessor";
+  if (s.includes("lessee") || s.includes("tenant") || /\bclient\b/.test(s)) return "lessee";
   if (s.includes("shared") || s.includes("both")) return "shared";
   return "other";
 }
@@ -380,8 +387,8 @@ export function parseSublettingMode(raw: string | undefined): SublettingMode | u
 export function parseDepositRefundTo(raw: string | undefined): DepositRefundTo | undefined {
   if (!raw) return undefined;
   const s = raw.toLowerCase();
-  if (s.includes("lessee") || s.includes("tenant")) return "lessee";
-  if (s.includes("lessor") || s.includes("landlord")) return "lessor";
+  if (s.includes("lessee") || s.includes("tenant") || /\bclient\b/.test(s)) return "lessee";
+  if (s.includes("lessor") || s.includes("landlord") || s.includes("service provider")) return "lessor";
   return "other";
 }
 
@@ -580,18 +587,24 @@ export function buildChecklistIntake(extracted: ExtractedChecklist): ChecklistIn
   const premisesAddress = fields.premisesAddress ?? propertyName;
   const city = inferCity(premisesAddress);
   const bedrooms = parseBedrooms(fields.bedrooms);
+  const areaMatch = fields.areaSqft?.match(/[\d][\d,.]*/);
+  const parsedArea = areaMatch ? Number(areaMatch[0].replace(/,/g, "")) : undefined;
+  const areaSqft = parsedArea && Number.isFinite(parsedArea) ? parsedArea : undefined;
   const unitType = parseUnitType(fields.unitNo, bedrooms);
   const unitLabels = splitUnitLabels(fields.unitNo);
   const units: UnitInput[] =
     unitLabels.length > 0
-      ? unitLabels.map((label) => ({ label, type: unitType, bedrooms }))
-      : [{ label: "Unit 1", type: unitType, bedrooms }];
+      ? unitLabels.map((label) => ({ label, type: unitType, bedrooms, areaSqft: unitLabels.length === 1 ? areaSqft : undefined }))
+      : [{ label: "Unit 1", type: unitType, bedrooms, areaSqft }];
 
   // ── Parties ───────────────────────────────────────────────
-  const lessorName = trimOrUndefined(fields.lessorName) ?? "Unknown lessor";
-  const lesseeName = trimOrUndefined(fields.lesseeName) ?? "Unknown lessee";
-  if (!fields.lessorName) warnings.push("Lessor name missing — placeholder used.");
-  if (!fields.lesseeName) warnings.push("Lessee name missing — placeholder used.");
+  const serviceAgreement = parseAgreementLabel(fields.agreementLabel) === "service_agreement";
+  const providerLabel = serviceAgreement ? "Service provider" : "Lessor";
+  const clientLabel = serviceAgreement ? "Client" : "Lessee";
+  const lessorName = trimOrUndefined(fields.lessorName) ?? `Unknown ${providerLabel.toLowerCase()}`;
+  const lesseeName = trimOrUndefined(fields.lesseeName) ?? `Unknown ${clientLabel.toLowerCase()}`;
+  if (!fields.lessorName) warnings.push(`${providerLabel} name missing — placeholder used.`);
+  if (!fields.lesseeName) warnings.push(`${clientLabel} name missing — placeholder used.`);
 
   // ── Master lease ──────────────────────────────────────────
   const masterMonthly = tranches[0].monthlyRent;
@@ -612,7 +625,9 @@ export function buildChecklistIntake(extracted: ExtractedChecklist): ChecklistIn
   // leases), others as a month count (e.g. Lucky Seven). parseAdvanceMonths
   // rejects money-shaped cells, so the money branch is captured separately
   // in clauses for the UI to surface.
-  const advanceMoney = parseMoneyAcrossUnits(fields.advancePayment, unitCount, masterCurrency);
+  const advanceMoney = parseAdvanceMonths(fields.advancePayment) === undefined
+    ? parseMoneyAcrossUnits(fields.advancePayment, unitCount, masterCurrency)
+    : undefined;
 
   // When the only schedule is sub-tenancy (residential sub-lease checklist),
   // the lease itself is a sub-lease — Capital Trust as sub-lessor to an
@@ -624,6 +639,7 @@ export function buildChecklistIntake(extracted: ExtractedChecklist): ChecklistIn
     kind: leaseKind,
     purpose,
     agreementLabel: parseAgreementLabel(fields.agreementLabel),
+    lockInEndDate: parseTerm(fields.lockInPeriod)?.endDate,
     startDate,
     endDate,
     status: "draft",
@@ -639,6 +655,7 @@ export function buildChecklistIntake(extracted: ExtractedChecklist): ChecklistIn
     })(),
     tranches,
     clauses: {
+      serviceScope: trimOrUndefined(fields.serviceScope),
       managementFeesBy: parseResponsibleParty(fields.managementFees),
       managementFeesNote: trimOrUndefined(fields.managementFees),
       serviceChargesBy: parseResponsibleParty(fields.serviceCharges),
@@ -704,6 +721,7 @@ export function buildChecklistIntake(extracted: ExtractedChecklist): ChecklistIn
   }
 
   return {
+    source: extracted.source,
     property: { name: propertyName, addressLine: premisesAddress, city },
     units,
     lessor: { displayName: lessorName, address: fields.lessorAddress, kind: parsePartyKind(lessorName) },

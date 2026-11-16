@@ -1,3 +1,5 @@
+import { agreementPeriodMonths as monthsBetween } from "@/lib/agreement-periods";
+import { agreementFieldLabel, agreementPartyLabels } from "@/lib/agreements";
 import { Suspense, type ComponentProps } from "react";
 import { can, DEFAULT_PERMISSIONS } from "@/lib/demo/identity";
 import { notFound } from "next/navigation";
@@ -73,13 +75,6 @@ function totalConsideration(tranches: { startDate: string; endDate: string; mont
   return { amount: total, currency };
 }
 
-function monthsBetween(startIso: string, endIso: string): number {
-  const start = new Date(startIso);
-  const end = new Date(endIso);
-  return (
-    (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1
-  );
-}
 
 async function LeaseParticipantsSection(props: Omit<ComponentProps<typeof LeaseParticipants>, "staff">) {
   const staff = props.canEdit ? await getAssignableStaff() : [];
@@ -122,6 +117,7 @@ export default async function LeaseDetailPage({
   ]);
   if (!details) notFound();
   const { lease, property: propertyAll, units: propertyUnits, obligations: allObligations, ledger: allLedger } = details;
+  const partyLabels = agreementPartyLabels(lease.agreementLabel);
   const historyPage = Math.max(1, Number(query.historyPage) || 1);
   const visibleLeases = scopeByLease(user, details.relatedLeases, (item) => item.id);
   const partyIds = new Set([lease, ...visibleLeases].flatMap((item) => [
@@ -212,7 +208,7 @@ export default async function LeaseDetailPage({
                 {propertyAll?.name ?? lessee?.displayName ?? "Lease"}
               </h1>
               <LeaseStatusBadge status={lease.status} />
-              <Badge variant="outline">{lease.kind}</Badge>
+              <Badge variant="outline">{lease.agreementLabel === "service_agreement" ? "Service Agreement" : lease.kind}</Badge>
               <Badge variant="outline">{lease.purpose}</Badge>
             </div>
             <p className="mt-1 text-muted-foreground text-sm">
@@ -342,6 +338,7 @@ export default async function LeaseDetailPage({
           switch. Documents + Lease document also live in both at the bottom. */}
       <LeaseViewSwitch
         leaseId={lease.id}
+        checklist={{ canEdit }}
         cardView={
           <>
             <PremisesCard
@@ -399,7 +396,7 @@ export default async function LeaseDetailPage({
             return (
               <CardContent className="grid gap-3 sm:grid-cols-2">
                 <PartyTile
-                  label="Landlord"
+                  label={partyLabels.lessor}
                   name={lessor?.displayName ?? "—"}
                   legal={lessor?.legalName}
                   ids={lessor?.nicOrPassport ?? lessor?.companyRegNo}
@@ -408,7 +405,7 @@ export default async function LeaseDetailPage({
                   phones={lessor?.phones}
                 />
                 <PartyTile
-                  label="Tenant"
+                  label={partyLabels.lessee}
                   name={lessee?.displayName ?? "—"}
                   legal={lessee?.legalName}
                   ids={lessee?.nicOrPassport ?? lessee?.companyRegNo}
@@ -416,16 +413,16 @@ export default async function LeaseDetailPage({
                   emails={lessee?.emails}
                   phones={lessee?.phones}
                 />
-                <RoleTile label="Landlord's Lawyer" party={landlordLawyer} />
-                <RoleTile label="Tenant's Lawyer" party={tenantLawyer} />
-                <RoleTile label="Landlord's Advisor" party={landlordAdvisor} />
-                <RoleTile label="Tenant's Advisor" party={tenantAdvisor} />
+                <RoleTile label={agreementFieldLabel(lease.agreementLabel, "Landlord's Lawyer")} party={landlordLawyer} />
+                <RoleTile label={agreementFieldLabel(lease.agreementLabel, "Tenant's Lawyer")} party={tenantLawyer} />
+                <RoleTile label={agreementFieldLabel(lease.agreementLabel, "Landlord's Advisor")} party={landlordAdvisor} />
+                <RoleTile label={agreementFieldLabel(lease.agreementLabel, "Tenant's Advisor")} party={tenantAdvisor} />
                 {otherRoles.map((r) => {
                   const p = partyById.get(r.partyId);
                   return (
                     <PartyTile
                       key={`${r.role}_${r.partyId}`}
-                      label={ROLE_LABELS[r.role] ?? r.role}
+                      label={agreementFieldLabel(lease.agreementLabel, ROLE_LABELS[r.role] ?? r.role)}
                       name={p?.displayName ?? "—"}
                       legal={p?.legalName}
                       ids={p?.nicOrPassport ?? p?.companyRegNo}
@@ -929,6 +926,7 @@ const DEPOSIT_REFUND_LABEL: Record<string, string> = {
 
 const AGREEMENT_LABEL: Record<string, string> = {
   lease_agreement: "Lease",
+  service_agreement: "Service Agreement",
   rental_agreement: "Rent",
   other: "Other",
 };
@@ -949,6 +947,9 @@ function ClausesCard({
   type Row = { label: string; value: React.ReactNode };
   const rows: Row[] = [];
 
+  if (lease.agreementLabel === "service_agreement") {
+    rows.push({ label: "Scope of services", value: c?.serviceScope || "Not specified" });
+  }
   if (lease.agreementLabel) {
     rows.push({
       label: "Agreement type",
@@ -982,7 +983,7 @@ function ClausesCard({
       label: "Management fees paid by",
       value: (
         <span>
-          {RESPONSIBLE_LABEL[c.managementFeesBy]}
+          {agreementFieldLabel(lease.agreementLabel, RESPONSIBLE_LABEL[c.managementFeesBy])}
           {c.managementFeesNote && (
             <span className="ml-1 text-muted-foreground">· {c.managementFeesNote}</span>
           )}
@@ -995,7 +996,7 @@ function ClausesCard({
       label: "Service charges paid by",
       value: (
         <span>
-          {RESPONSIBLE_LABEL[c.serviceChargesBy]}
+          {agreementFieldLabel(lease.agreementLabel, RESPONSIBLE_LABEL[c.serviceChargesBy])}
           {c.serviceChargesNote && (
             <span className="ml-1 text-muted-foreground">· {c.serviceChargesNote}</span>
           )}
@@ -1008,7 +1009,7 @@ function ClausesCard({
       label: "A/C service paid by",
       value: (
         <span>
-          {RESPONSIBLE_LABEL[c.acServiceBy]}
+          {agreementFieldLabel(lease.agreementLabel, RESPONSIBLE_LABEL[c.acServiceBy])}
           {c.acServiceNote && (
             <span className="ml-1 text-muted-foreground">· {c.acServiceNote}</span>
           )}
@@ -1055,7 +1056,7 @@ function ClausesCard({
       label: "Applicability of WHT & other taxes",
       value: (
         <span>
-          {c.taxApplicabilityBy ? RESPONSIBLE_LABEL[c.taxApplicabilityBy] : "—"}
+          {c.taxApplicabilityBy ? agreementFieldLabel(lease.agreementLabel, RESPONSIBLE_LABEL[c.taxApplicabilityBy]) : "—"}
           {c.taxApplicabilityNote &&
             c.taxApplicabilityNote.toLowerCase() !==
               (c.taxApplicabilityBy ?? "") && (
@@ -1130,7 +1131,7 @@ function ClausesCard({
       value:
         c.depositRefundTo === "other"
           ? (c.depositRefundOther ?? "Other")
-          : DEPOSIT_REFUND_LABEL[c.depositRefundTo],
+          : agreementFieldLabel(lease.agreementLabel, DEPOSIT_REFUND_LABEL[c.depositRefundTo]),
     });
   }
   if (c?.earlyTerminationPenalty) {

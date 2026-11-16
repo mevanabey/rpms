@@ -42,8 +42,7 @@ import type { ChecklistImportResult } from "@/lib/checklist/result";
 import {
   type ExtractedChecklist,
   extractChecklist,
-  parseCsv,
-  parseXlsx,
+  parseChecklistSource,
 } from "@/lib/checklist/parse";
 import { useDemoStore } from "@/lib/demo/store";
 import { useCurrentUser } from "@/lib/demo/use-store";
@@ -115,12 +114,8 @@ export default function ChecklistUploadPage() {
   const clearAll = () => setFiles([]);
 
   const parseRow = async (row: FileRow): Promise<ExtractedChecklist> => {
-    const ext = row.file.name.toLowerCase().split(".").pop() ?? "";
-    const grid =
-      ext === "csv"
-        ? parseCsv(await row.file.text())
-        : parseXlsx(await row.file.arrayBuffer());
-    return extractChecklist(grid);
+    const source = parseChecklistSource(await row.file.arrayBuffer(), row.file.name);
+    return { ...extractChecklist(source.sheets[source.importSheetIndex].rows), source };
   };
 
   const importRow = async (row: FileRow): Promise<void> => {
@@ -145,9 +140,7 @@ export default function ChecklistUploadPage() {
     updateRow(row.id, () => ({ ...row, status: { kind: "importing", extracted } }));
     try {
       const result = await importChecklist({
-        fields: extracted.fields,
-        schedules: extracted.schedules,
-        unknown: extracted.unknown,
+        source: extracted.source,
       });
       updateRow(row.id, () => ({ ...row, status: { kind: "done", extracted, result } }));
       pushActivity({
@@ -231,7 +224,7 @@ export default function ChecklistUploadPage() {
           <h1 className="font-bold text-2xl tracking-tight">Checklist upload</h1>
           <p className="mt-1 text-muted-foreground text-sm">
             Each file becomes
-            a draft lease (auto-created or matched by name). 
+            a draft lease or service agreement (parties and premises matched by name).
             Multi-tranche rent schedules are read directly
             from the schedule table; checklists with a sub-tenancy block create
             a paired sub-lease. Anything we can&apos;t parse is logged per row.
@@ -241,7 +234,7 @@ export default function ChecklistUploadPage() {
             <code className="font-mono text-xs">.csv</code>.
           </p>
           <p className="mt-2 text-muted-foreground text-sm">
-            Open an imported lease to edit its checklist details or delete it.
+            Open an imported agreement to edit its checklist details or delete it.
             Your imports also appear in Leases after you leave this page.
           </p>
         </div>

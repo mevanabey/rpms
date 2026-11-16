@@ -126,6 +126,21 @@ The same platform handles two materially different operations. Both share entiti
 - Mail-merge reminders to landlord *and* tenant on cadence (monthly / quarterly / bi-annual)
 - Existing aliases: `accommodationbpo@gmail.com`, `chamodi.niluthpala@gmail.com`, `amycapili0@gmail.com`, `ktan0857@gmail.com` are CCs on tenant comms
 
+### 4c. Premises-based service agreements
+
+- `agreementLabel: service_agreement` distinguishes this instrument from leases and rentals. The existing `lessorPartyId` slot stores the service provider and `lesseePartyId` stores the client; UI, checklist exports, documents and onboarding emails use the corresponding labels.
+- Creation, inline editing, checklist import/export, assignments, payments and document uploads share the existing agreement workflow and server authorization. The existing varchar agreement label and JSON clause fields require no migration.
+- Intake accepts Service Provider / Client names and addresses, premises and area, monthly payments, advance, deposit, responsibilities, notices and lock-in dates. `clauses.serviceScope` captures the agreed services when supplied.
+- Service document generation produces a draft **terms summary** from captured fields. It does not reuse the commercial or residential lease precedents. Operators can upload the full reviewed service agreement through the existing document workflow.
+
+### 4d. Original checklist view
+
+- Lease detail offers List View, Card View and Checklist View, with the selected view remembered in the browser. New imports retain all worksheets, original displayed cell values, row/column order, blank rows and merged cells. Workbook styling and formula recalculation are not reproduced.
+- Checklist View loads its saved source only when opened. A discreet Show mapping control reveals each row’s parsed field destinations, duplicate or unused values and unmatched content. Source and mapping evidence remain unchanged by later agreement edits.
+- Older imports can attach their original file without reimporting or changing agreement data. Their mapping details are explicitly a current-parser preview, since the historical mapping cannot be recovered from the original alone.
+- A source containing paired agreements requires access to both agreements. Original cells are excluded from normal lease and audit-history read payloads.
+- The Leases & agreements list includes an agreement-type filter. Existing records with no explicit type are treated as leases for filtering.
+
 ## 5. Domain model
 
 ### 5.1 Entity-relationship overview

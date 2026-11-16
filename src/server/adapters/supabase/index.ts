@@ -1,4 +1,5 @@
 import "server-only";
+import { readSavedChecklist } from "@/lib/checklist/source-schema";
 
 import {
   and,
@@ -178,10 +179,10 @@ async function loadLedgerEntry(id: string): Promise<LedgerEntry> {
 // Relational reads use lateral joins/JSON aggregation to return one row per
 // lease in one SQL statement, avoiding a round trip for each child table.
 const leaseChildren = { tranches: true, partyRoles: true, units: true } as const;
-type LeaseJoinedRow = typeof leaseTable.$inferSelect & Omit<Parameters<typeof toLease>[0], "lease">;
+type LeaseJoinedRow = Omit<typeof leaseTable.$inferSelect, "importMeta"> & { importMeta?: unknown } & Omit<Parameters<typeof toLease>[0], "lease">;
 
 function mapLeaseRow(row: LeaseJoinedRow): Lease {
-  return toLease({ lease: row, tranches: row.tranches, partyRoles: row.partyRoles, units: row.units });
+  return toLease({ lease: { ...row, importMeta: row.importMeta ?? null }, tranches: row.tranches, partyRoles: row.partyRoles, units: row.units });
 }
 
 function leaseWhere(filter?: LeaseListFilter) {
@@ -201,8 +202,20 @@ function leaseWhere(filter?: LeaseListFilter) {
 
 export const supabaseBackend: Backend = {
   leases: {
+    async getChecklist(id) {
+      const [row] = await db.select({ checklist: sql<unknown>`${leaseTable.importMeta}->'checklist'` })
+        .from(leaseTable).where(and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt))).limit(1);
+      return readSavedChecklist(row?.checklist);
+    },
+    async saveChecklist(id, checklist) {
+      const [row] = await db.update(leaseTable).set({
+        importMeta: sql`jsonb_set(coalesce(${leaseTable.importMeta}, '{}'::jsonb), '{checklist}', ${JSON.stringify(checklist)}::jsonb, true)`,
+      }).where(and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt), sql`${leaseTable.importMeta}->'checklist' is null`)).returning({ id: leaseTable.id });
+      if (!row) throw new Error("The agreement is missing or already has its original checklist.");
+    },
     async list(filter): Promise<Lease[]> {
       const rows = await db.query.lease.findMany({
+        columns: { importMeta: false },
         where: leaseWhere(filter),
         orderBy: desc(leaseTable.startDate),
         with: leaseChildren,
@@ -214,6 +227,7 @@ export const supabaseBackend: Backend = {
       // One statement includes the table's labels and just the next unpaid
       // incoming rent line per lease, rather than the complete rent ledger.
       const rows = await db.query.lease.findMany({
+        columns: { importMeta: false },
         where: leaseWhere(filter),
         orderBy: desc(leaseTable.startDate),
         with: {
@@ -244,6 +258,7 @@ export const supabaseBackend: Backend = {
 
     async get(id): Promise<Lease | null> {
       const row = await db.query.lease.findFirst({
+        columns: { importMeta: false },
         where: and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt)),
         with: leaseChildren,
       });
@@ -252,6 +267,7 @@ export const supabaseBackend: Backend = {
 
     async getDetails(id): Promise<LeaseDetails | null> {
       const row = await db.query.lease.findFirst({
+        columns: { importMeta: false },
         where: and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt)),
         with: {
           ...leaseChildren,
@@ -261,8 +277,9 @@ export const supabaseBackend: Backend = {
           partyRoles: { with: { party: true } },
           obligations: { orderBy: (entry) => asc(entry.dueDate) },
           ledger: { orderBy: (entry) => asc(entry.dueDate) },
-          parent: { with: { ...leaseChildren, lessee: true } },
+          parent: { columns: { importMeta: false }, with: { ...leaseChildren, lessee: true } },
           children: {
+            columns: { importMeta: false },
             where: (child) => isNull(child.deletedAt),
             orderBy: (child) => desc(child.startDate),
             with: { ...leaseChildren, lessee: true },

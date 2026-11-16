@@ -1,3 +1,4 @@
+import type { SavedChecklist } from "../checklists";
 import type {
   AgreementLabel,
   Lease,
@@ -143,6 +144,8 @@ export interface TrancheUpdateInput {
 }
 
 export interface ILeaseService {
+  getChecklist(id: string): Promise<SavedChecklist | null>;
+  saveChecklist(id: string, checklist: SavedChecklist): Promise<void>;
   list(filter?: LeaseListFilter): Promise<Lease[]>;
   listOverview(filter?: LeaseListFilter): Promise<LeaseOverview[]>;
   get(id: string): Promise<Lease | null>;

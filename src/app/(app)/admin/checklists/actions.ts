@@ -8,6 +8,9 @@ import {
 } from "@/lib/checklist/build-lease";
 import { importChecklistToBackend } from "@/lib/checklist/import";
 import type { ScheduleBlock } from "@/lib/checklist/parse";
+import { extractChecklist } from "@/lib/checklist/parse";
+import { checklistSourceSchema } from "@/lib/checklist/source-schema";
+import type { ChecklistSource } from "@/core/checklists";
 import type { ChecklistImportResult } from "@/lib/checklist/result";
 import { getBackend } from "@/server/container";
 import { requireResource } from "@/lib/auth/authorization";
@@ -15,7 +18,8 @@ import { withAudit } from "@/server/db/client";
 import type { AppUser } from "@/lib/demo/identity";
 
 export interface ChecklistInput {
-  fields: ChecklistFields;
+  source?: ChecklistSource;
+  fields?: ChecklistFields;
   schedules?: ScheduleBlock[];
   unknown?: Array<{ key: string; value: string }>;
 }
@@ -53,11 +57,18 @@ export async function importChecklistBatch(inputs: ChecklistInput[]): Promise<{
 }
 
 async function importOne(input: ChecklistInput, actor: AppUser): Promise<ChecklistImportResult> {
+  if (input.source) {
+    const source = checklistSourceSchema.parse(input.source);
+    const extracted = extractChecklist(source.sheets[source.importSheetIndex].rows);
+    if (!Object.keys(extracted.fields).length) throw new Error("No recognised checklist fields found.");
+    const intake = buildChecklistIntake({ ...extracted, source });
+    return withAudit(actor, "Checklist imported", () => importChecklistToBackend(getBackend(), intake), { source: "checklist-upload" });
+  }
   // `ChecklistFields` has optional keys; the raw extractor types `fields` as
   // `Record<string, string>`. Strip `undefined`s before forwarding so the
   // widened shape lines up.
   const fields: Record<string, string> = {};
-  for (const [k, v] of Object.entries(input.fields)) {
+  for (const [k, v] of Object.entries(input.fields ?? {})) {
     if (typeof v === "string") fields[k] = v;
   }
   const intake = buildChecklistIntake({

@@ -28,17 +28,17 @@ export default async function LeasesPage() {
     <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="font-bold text-2xl tracking-tight">Leases</h1>
+          <h1 className="font-bold text-2xl tracking-tight">Leases & agreements</h1>
           <p className="mt-1 text-muted-foreground text-sm">
             {hasRole(user, "admin")
-              ? "Every lease — head and sub — with parties, schedule, and status."
-              : "Leases assigned to you or created by you."}
+              ? "Leases and service agreements with parties, payment schedules, and status."
+              : "Leases and agreements assigned to you or created by you."}
           </p>
         </div>
         {(can(user, DEFAULT_PERMISSIONS, "leases:create")) && <Button asChild>
           <Link href="/leases/new">
             <Plus className="size-4" />
-            New lease
+            New agreement
           </Link>
         </Button>}
       </div>
