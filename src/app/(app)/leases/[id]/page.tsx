@@ -45,6 +45,8 @@ import { scopeByLease } from "@/lib/demo/scope";
 import { LeaseDetailActions } from "./_components/lease-detail-actions";
 import { LeaseEditBootstrap } from "./_components/lease-edit-bootstrap";
 import { LeaseDetailsTable } from "./_components/lease-details-table";
+import { ChecklistReviewPanel } from "./_components/checklist-review-panel";
+import { isChecklistImport, needsChecklistReview } from "@/lib/checklist/review-status";
 import { LeaseProgressBlock } from "./_components/lease-progress-block";
 import { LeaseParticipants } from "./_components/lease-participants";
 import { LeaseViewSwitch } from "./_components/lease-view-switch";
@@ -207,7 +209,7 @@ export default async function LeaseDetailPage({
               <h1 className="font-bold text-2xl tracking-tight">
                 {propertyAll?.name ?? lessee?.displayName ?? "Lease"}
               </h1>
-              <LeaseStatusBadge status={lease.status} />
+              {needsChecklistReview(lease) ? <Badge variant="outline">Awaiting checklist approval</Badge> : <LeaseStatusBadge status={lease.status} />}
               <Badge variant="outline">{lease.agreementLabel === "service_agreement" ? "Service Agreement" : lease.kind}</Badge>
               <Badge variant="outline">{lease.purpose}</Badge>
             </div>
@@ -316,7 +318,7 @@ export default async function LeaseDetailPage({
         </Card>
       </div>
 
-      {canEdit && <LeaseProgressBlock
+      {isChecklistImport(lease) ? <ChecklistReviewPanel lease={lease} canEdit={canEdit} canRecordPayments={can(user, DEFAULT_PERMISSIONS, "payments:write")} /> : canEdit && <LeaseProgressBlock
         leaseId={lease.id}
         status={lease.status}
         onboardingStage={lease.onboardingStage}

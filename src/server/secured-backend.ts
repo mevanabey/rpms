@@ -1,6 +1,8 @@
 import "server-only";
 
 import type { Backend } from "@/core/services";
+import { assertChecklistReviewed } from "@/lib/checklist/review-status";
+import { can, DEFAULT_PERMISSIONS } from "@/lib/demo/identity";
 import type { AppUser } from "@/lib/demo/identity";
 import { requireAppUser } from "@/lib/auth/identity";
 import { canSeeLease, scopedLeaseIds, scopeByLease } from "@/lib/demo/scope";
@@ -14,6 +16,16 @@ export function secureBackend(backend: Backend, getUser: () => Promise<AppUser> 
       const actor = await getUser();
       return withAudit(actor, action, () => operation(...args));
     };
+  }
+  async function requireReviewed(id: string) {
+    const user = await getUser();
+    if (!canSeeLease(user, id)) throw new Error("Access denied.");
+    const lease = await backend.leases.get(id);
+    if (!lease) throw new Error("Lease not found.");
+    assertChecklistReviewed(lease);
+  }
+  function reviewed<A extends [string, ...unknown[]], R>(action: string, operation: (...args: A) => Promise<R>) {
+    return async (...args: A): Promise<R> => { await requireReviewed(args[0]); return audited(action, operation)(...args); };
   }
   return {
     ...backend,
@@ -67,16 +79,33 @@ export function secureBackend(backend: Backend, getUser: () => Promise<AppUser> 
           obligations: result.obligations.filter((entry) => entry.leaseId === id),
         };
       },
+      async approveChecklist(id, input) {
+        const actor = await getUser();
+        if (!canSeeLease(actor, id) || !can(actor, DEFAULT_PERMISSIONS, "leases:write")) throw new Error("Access denied.");
+        if (input.receipts.length && !can(actor, DEFAULT_PERMISSIONS, "payments:write")) throw new Error("Payment access is required to record collected rent.");
+        const original = await backend.leases.getChecklist(id);
+        if (!original) throw new Error("Attach the original checklist before sign-off.");
+        if (!original.requiredLeaseIds.every((leaseId) => canSeeLease(actor, leaseId))) throw new Error("Reviewing this checklist requires access to its linked agreements.");
+        return withAudit(actor, "Checklist reviewed, approved and signed off", () => backend.leases.approveChecklist(id, { ...input,
+          approvedById: actor.id, approvedByName: actor.name, approvedAt: new Date().toISOString(),
+        }));
+      },
       create: audited("Lease created", backend.leases.create),
-      update: audited("Lease edited", backend.leases.update),
-      updateStatus: audited("Lease status changed", backend.leases.updateStatus),
+      async update(id, patch) {
+        if (patch.status && patch.status !== "draft") await requireReviewed(id);
+        return audited("Lease edited", backend.leases.update)(id, patch);
+      },
+      async updateStatus(id, status) {
+        if (status !== "draft") await requireReviewed(id);
+        return audited("Lease status changed", backend.leases.updateStatus)(id, status);
+      },
       updateTranche: audited("Rent terms edited", backend.leases.updateTranche),
       softDelete: audited("Lease deleted", backend.leases.softDelete),
-      attachSignedLease: audited("Signed lease uploaded", backend.leases.attachSignedLease),
-      setOnboardingStage: audited("Lease workflow stage changed", backend.leases.setOnboardingStage),
-      markAgreementGenerated: audited("Lease agreement saved", backend.leases.markAgreementGenerated),
-      markLeaseEmailSent: audited("Lease email sent", backend.leases.markLeaseEmailSent),
-      markLeaseActive: audited("Lease activated", backend.leases.markLeaseActive),
+      attachSignedLease: reviewed("Signed lease uploaded", backend.leases.attachSignedLease),
+      setOnboardingStage: reviewed("Lease workflow stage changed", backend.leases.setOnboardingStage),
+      markAgreementGenerated: reviewed("Lease agreement saved", backend.leases.markAgreementGenerated),
+      markLeaseEmailSent: reviewed("Lease email sent", backend.leases.markLeaseEmailSent),
+      markLeaseActive: reviewed("Lease activated", backend.leases.markLeaseActive),
       generateRentSchedule: audited("Rent schedule generated", backend.leases.generateRentSchedule),
     },
     parties: {

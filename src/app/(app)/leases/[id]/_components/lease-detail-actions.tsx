@@ -1,5 +1,6 @@
 "use client";
 
+import { isChecklistImport } from "@/lib/checklist/review-status";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSubmission } from "@/hooks/use-submission";
@@ -82,7 +83,7 @@ export function LeaseDetailActions({
     lease.status === "terminated" ||
     lease.status === "renewed";
   const showSignedControl =
-    hasSigned || isPostSigning || lease.onboardingStage === "at_accounts";
+    hasSigned || (!isChecklistImport(lease) && (isPostSigning || lease.onboardingStage === "at_accounts"));
 
   const onFilePicked = (file: File) => {
     const fd = new FormData();
@@ -177,7 +178,7 @@ export function LeaseDetailActions({
           Checklist View
         </Button>
       </ButtonGroup>
-      <Button
+      {!isChecklistImport(lease) && <Button
         variant="outline"
         size="sm"
         onClick={() => toggleProgress(lease.id)}
@@ -191,7 +192,7 @@ export function LeaseDetailActions({
         ) : (
           <ChevronDown className="size-3.5" />
         )}
-      </Button>
+      </Button>}
       {showSignedControl &&
         (hasSigned ? (
           <Button variant="outline" size="sm" onClick={openSignedLease} disabled={opening}>

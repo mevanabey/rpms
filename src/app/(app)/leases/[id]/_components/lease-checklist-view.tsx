@@ -9,12 +9,15 @@ import { Spinner } from "@/components/ui/spinner";
 import { useSubmission } from "@/hooks/use-submission";
 import { attachChecklistAction, loadChecklistAction } from "@/server/actions/checklist";
 import { ChecklistSourceTable } from "./checklist-source-table";
+import { ChecklistUploadErrorPanel } from "@/components/checklist/upload-error-panel";
+import { checklistUploadProblem, type ChecklistUploadProblem } from "@/lib/checklist/upload-errors";
 
 export default function LeaseChecklistView({ leaseId, canEdit }: { leaseId: string; canEdit: boolean }) {
   const [checklist, setChecklist] = useState<SavedChecklist | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [uploadProblem, setUploadProblem] = useState<ChecklistUploadProblem | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const { pending, run } = useSubmission();
 
@@ -47,14 +50,26 @@ export default function LeaseChecklistView({ leaseId, canEdit }: { leaseId: stri
           event.target.value = "";
           if (!file) return;
           void run(async () => {
-            const { parseChecklistSource } = await import("@/lib/checklist/parse");
-            const source = parseChecklistSource(await file.arrayBuffer(), file.name);
-            const result = await attachChecklistAction(leaseId, source);
-            if (!result.ok) throw new Error(result.error);
-            setChecklist(result.data);
+            setUploadProblem(null);
+            let source;
+            try {
+              const { parseChecklistSource } = await import("@/lib/checklist/parse");
+              source = parseChecklistSource(await file.arrayBuffer(), file.name);
+            } catch (error) {
+              setUploadProblem(checklistUploadProblem(error, "read"));
+              return;
+            }
+            try {
+              const result = await attachChecklistAction(leaseId, source);
+              if (!result.ok) { setUploadProblem(result.problem ?? checklistUploadProblem(null, "prepare")); return; }
+              setChecklist(result.data);
+            } catch {
+              setUploadProblem({ title: "We couldn’t confirm the checklist was attached", explanation: "The connection was interrupted while saving the checklist.", steps: ["Reload the page to check whether it was saved. If the original is still missing, attach it again."], recovery: "retry" });
+            }
           });
         }} />
         <Button variant="outline" disabled={pending} onClick={() => input.current?.click()}>{pending ? <Spinner /> : <Upload className="size-4" />}{pending ? "Saving checklist…" : "Attach original checklist"}</Button>
+        {uploadProblem && <ChecklistUploadErrorPanel problem={uploadProblem} disabled={pending} onReplace={() => input.current?.click()} />}
       </> : <p className="text-sm text-muted-foreground">An editor can attach the original checklist for this agreement.</p>}
     </CardContent>
   </Card>;

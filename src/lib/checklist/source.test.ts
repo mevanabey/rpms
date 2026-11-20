@@ -5,8 +5,8 @@ import type { ChecklistSource } from "@/core/checklists";
 import { buildChecklistIntake } from "./build-lease";
 import { buildChecklistMappings } from "./mappings";
 import { importChecklistToBackend } from "./import";
-import { extractChecklist, parseChecklistSource } from "./parse";
-import { checklistSourceSchema } from "./source-schema";
+import { checklistSheetChoices, extractChecklist, parseChecklistSource, selectChecklistImportSheet } from "./parse";
+import { checklistSourceSchema, MAX_CHECKLIST_COLUMNS } from "./source-schema";
 import { mockBackend } from "@/server/adapters/mock";
 
 const source: ChecklistSource = {
@@ -54,6 +54,48 @@ test("workbook snapshots preserve displayed values, whitespace, blanks, sheets a
   assert.deepEqual(result.sheets[0].rows[2], ["", "", ""]);
   assert.deepEqual(result.sheets[0].merges, [{ startRow: 4, startColumn: 0, endRow: 4, endColumn: 2 }]);
   assert.equal(result.sheets[1].name, "Other sheet");
+});
+
+test("wide checklists preserve actual values beyond column BH and enforce shared limits", () => {
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([["Premises address", "Example Road"]]);
+  sheet.BI39 = { t: "n", v: 46000, z: "dd-mmm-yyyy" };
+  sheet.BJ40 = { t: "n", v: 4500000, f: "4500000*1.15-675000", z: "#,##0.00" };
+  sheet["!ref"] = "A1:BJ61";
+  sheet["!merges"] = [XLSX.utils.decode_range("B1:M1")];
+  XLSX.utils.book_append_sheet(workbook, sheet, "Wide checklist");
+  const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  const snapshot = parseChecklistSource(bytes, "wide.xlsx");
+  assert.equal(snapshot.sheets[0].rows.length, 61);
+  assert.equal(snapshot.sheets[0].rows[0].length, 62);
+  assert.equal(snapshot.sheets[0].rows[39][61], "4,500,000.00");
+  assert.ok(snapshot.sheets[0].rows[38][60]);
+  assert.equal(snapshot.sheets[0].merges[0].endColumn, 12);
+  assert.equal(checklistSourceSchema.safeParse(snapshot).success, true);
+  const tooWide = structuredClone(snapshot);
+  tooWide.sheets[0].rows[0] = Array(MAX_CHECKLIST_COLUMNS + 1).fill("");
+  assert.equal(checklistSourceSchema.safeParse(tooWide).success, false);
+  sheet["!ref"] = `A1:${XLSX.utils.encode_col(MAX_CHECKLIST_COLUMNS)}61`;
+  assert.throws(() => parseChecklistSource(XLSX.write(workbook, { bookType: "xlsx", type: "array" }), "too-wide.xlsx"), /Wide checklist.*256 columns/);
+});
+
+test("multiple checklist versions require a choice and import only that sheet", async () => {
+  const revised = structuredClone(source.sheets[0]);
+  revised.name = "Revised";
+  revised.rows[3][1] = "Revised Client";
+  const multi = { ...structuredClone(source), sheets: [source.sheets[0], revised, source.sheets[1]] };
+  assert.deepEqual(checklistSheetChoices(multi).map((s) => s.name), ["Checklist", "Revised"]);
+  assert.throws(() => selectChecklistImportSheet(multi), /multiple checklists/);
+  for (const invalid of [-1, 0.5, 2, 99]) assert.throws(() => selectChecklistImportSheet(multi, invalid), /recognised checklist/);
+  const selected = selectChecklistImportSheet(multi, 1);
+  const intake = buildChecklistIntake({ ...extractChecklist(selected.sheets[1].rows), source: selected });
+  assert.equal(intake.lessee.displayName, "Revised Client");
+  const imported = await importChecklistToBackend(mockBackend, intake);
+  const saved = await mockBackend.leases.getChecklist(imported.leaseId);
+  assert.equal(saved?.source.importSheetIndex, 1);
+  assert.equal(saved?.source.sheets.length, 3);
+  assert.ok(saved?.mappings.filter((m) => m.sheet === 0).every((m) => ["unmapped", "blank"].includes(m.status)));
+  assert.equal(selectChecklistImportSheet(source).importSheetIndex, 0, "single checklist needs no extra choice");
 });
 
 test("mapping distinguishes duplicates, unknowns, empty values and schedule-only values", () => {

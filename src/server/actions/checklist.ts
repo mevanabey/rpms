@@ -8,8 +8,12 @@ import { buildChecklistMappings } from "@/lib/checklist/mappings";
 import { extractChecklist } from "@/lib/checklist/parse";
 import { checklistSourceSchema } from "@/lib/checklist/source-schema";
 import { getBackend } from "@/server/container";
+import { checklistUploadProblem, type ChecklistUploadProblem } from "@/lib/checklist/upload-errors";
+import type { ChecklistSource } from "@/core/checklists";
+import { userErrorMessage } from "@/lib/user-error";
+import { randomUUID } from "node:crypto";
 
-type Result = { ok: true; data: SavedChecklist | null } | { ok: false; error: string };
+type Result = { ok: true; data: SavedChecklist | null } | { ok: false; error: string; problem?: ChecklistUploadProblem };
 
 export async function loadChecklistAction(leaseId: string): Promise<Result> {
   try {
@@ -17,7 +21,11 @@ export async function loadChecklistAction(leaseId: string): Promise<Result> {
     await requireLeaseAccess(leaseId);
     return { ok: true, data: await getBackend().leases.getChecklist(leaseId) };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Could not load the checklist." };
+    const problem = checklistUploadProblem(error, "prepare");
+    console.error("Could not load original checklist", error);
+    return { ok: false, error: ["sign_in", "contact_admin"].includes(problem.recovery)
+      ? userErrorMessage(error)
+      : "We couldn’t load the original checklist. Check your connection and choose Retry. If it still fails, ask your administrator for help." };
   }
 }
 
@@ -38,6 +46,16 @@ export async function attachChecklistAction(leaseId: string, input: unknown): Pr
     await backend.leases.saveChecklist(leaseId, checklist);
     return { ok: true, data: checklist };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Could not attach the checklist." };
+    const reference = `CHK-${randomUUID().slice(0, 8).toUpperCase()}`;
+    console.error(`Checklist attachment ${reference}`, error);
+    let problem = checklistUploadProblem(error, "prepare", input as ChecklistSource);
+    if (problem.recovery === "sign_in") problem = { ...problem, steps: ["Sign in again, then return to this page and attach the original checklist."] };
+    if (problem.recovery === "contact_admin") problem = { ...problem, steps: ["Ask your administrator to check your lease permissions, then attach the original checklist again. You do not need to change the spreadsheet."] };
+    if (problem.recovery === "retry") problem = {
+      title: "We couldn’t confirm the checklist was attached",
+      explanation: "The original checklist could not be saved, or we did not receive confirmation.",
+      steps: ["Reload this page to see whether the original checklist is now available.", "If it is still missing, try attaching it again. If this continues, share the help reference with your administrator."], recovery: "retry",
+    };
+    return { ok: false, error: problem.title, problem: { ...problem, reference } };
   }
 }

@@ -554,7 +554,7 @@ export function buildChecklistIntake(extracted: ExtractedChecklist): ChecklistIn
     tranches = trancheSegmentsFromText(fields.monthlyRent, fallbackCurrency);
     if (tranches.length > 0) {
       masterCurrency = tranches[0].monthlyRent.currency;
-      warnings.push("Tranches derived from metadata 'Monthly Rental' text (no schedule table found).");
+      warnings.push("Rent periods were taken from the Monthly Rental field because no rent table was found. Check the amounts and dates before approving.");
     }
   }
 
@@ -572,7 +572,7 @@ export function buildChecklistIntake(extracted: ExtractedChecklist): ChecklistIn
       },
     ];
     masterCurrency = (single?.currency ?? fallbackCurrency);
-    if (!single) warnings.push("Monthly rent couldn't be parsed — set to 0; edit before activation.");
+    if (!single) warnings.push("We could not read the monthly rent, so it is currently 0. Open the draft agreement and enter the correct amount before approving.");
   }
 
   const startDate = tranches[0].startDate;
@@ -603,8 +603,8 @@ export function buildChecklistIntake(extracted: ExtractedChecklist): ChecklistIn
   const clientLabel = serviceAgreement ? "Client" : "Lessee";
   const lessorName = trimOrUndefined(fields.lessorName) ?? `Unknown ${providerLabel.toLowerCase()}`;
   const lesseeName = trimOrUndefined(fields.lesseeName) ?? `Unknown ${clientLabel.toLowerCase()}`;
-  if (!fields.lessorName) warnings.push(`${providerLabel} name missing — placeholder used.`);
-  if (!fields.lesseeName) warnings.push(`${clientLabel} name missing — placeholder used.`);
+  if (!fields.lessorName) warnings.push(`${providerLabel} name was not found. Open the draft agreement and replace the temporary name before approving.`);
+  if (!fields.lesseeName) warnings.push(`${clientLabel} name was not found. Open the draft agreement and replace the temporary name before approving.`);
 
   // ── Master lease ──────────────────────────────────────────
   const masterMonthly = tranches[0].monthlyRent;
@@ -712,12 +712,12 @@ export function buildChecklistIntake(extracted: ExtractedChecklist): ChecklistIn
           clauses: {},
         },
       };
-      warnings.push("Sub-tenancy schedule detected — paired sub-lease created with placeholder lessee; edit before activation.");
+      warnings.push("A linked sub-lease was also created. Open it and replace the temporary tenant name before approving.");
     }
   }
 
   if (extracted.schedules.length === 0) {
-    warnings.push("No schedule table detected — used metadata fields only.");
+    warnings.push("No rent table was found. Rent details were taken from the checklist fields; check the amounts and dates before approving.");
   }
 
   return {

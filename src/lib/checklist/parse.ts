@@ -15,10 +15,11 @@
  */
 
 import * as XLSX from "xlsx";
+import { ChecklistUploadError, checklistUploadProblem, fileProblem, sheetSizeProblem, unsupportedChecklist } from "./upload-errors";
 
 import type { Currency } from "@/core/types";
 import type { ChecklistSource } from "@/core/checklists";
-import { checklistSourceSchema } from "./source-schema";
+import { checklistSourceSchema, MAX_CHECKLIST_COLUMNS, MAX_CHECKLIST_ROWS } from "./source-schema";
 
 // ─────────────────────────────────────────────────────── File → Grid
 
@@ -91,16 +92,18 @@ export function parseXlsx(buffer: ArrayBuffer): Grid {
 /** Preserve formatted display values without trimming or dropping empty cells.
  * All sheets survive, even though the importer consumes one selected sheet. */
 export function parseChecklistSource(buffer: ArrayBuffer, fileName: string): ChecklistSource {
-  if (buffer.byteLength > 10 * 1024 * 1024) throw new Error("Checklist files must be 10 MB or smaller.");
+  if (!/\.(csv|xlsx|xls|ods)$/i.test(fileName)) throw new ChecklistUploadError(unsupportedChecklist());
+  if (!buffer.byteLength) throw new ChecklistUploadError(fileProblem("This file is empty", "The selected file has no contents.", "Open the completed checklist in Excel, save it and upload the saved copy."));
+  if (buffer.byteLength > 10 * 1024 * 1024) throw new ChecklistUploadError(fileProblem("This file is too large", `This file is ${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB. The limit is 10 MB per checklist.`, "Save a copy without unnecessary images or worksheets, then upload it again. Keep all required checklist information."));
   if (fileName.toLowerCase().endsWith(".csv")) {
-    return checklistSourceSchema.parse({ version: 1, fileName, importSheetIndex: 0,
+    return validateChecklistSource({ version: 1, fileName, importSheetIndex: 0,
       sheets: [{ name: "Checklist", rows: parseCsv(new TextDecoder().decode(buffer)), merges: [] }] });
   }
   const workbook = XLSX.read(buffer, { type: "array" });
   const sheets = workbook.SheetNames.map((name) => {
     const sheet = workbook.Sheets[name];
     const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null;
-    if (range && (range.e.r >= 2000 || range.e.c >= 60)) throw new Error("Checklist sheets must fit within 2,000 rows and 60 columns. No rows were imported.");
+    if (range && (range.e.r >= MAX_CHECKLIST_ROWS || range.e.c >= MAX_CHECKLIST_COLUMNS)) throw new ChecklistUploadError(sheetSizeProblem(name, range.e.r + 1, range.e.c + 1));
     const rows = range ? Array.from({ length: range.e.r + 1 }, (_, r) =>
       Array.from({ length: range.e.c + 1 }, (_, c) => {
         const cell = sheet[XLSX.utils.encode_cell({ r, c })];
@@ -111,7 +114,29 @@ export function parseChecklistSource(buffer: ArrayBuffer, fileName: string): Che
     })) };
   });
   const selected = sheets.findIndex((sheet) => looksLikeChecklist(sheet.rows));
-  return checklistSourceSchema.parse({ version: 1, fileName, sheets, importSheetIndex: Math.max(0, selected) });
+  return validateChecklistSource({ version: 1, fileName, sheets, importSheetIndex: Math.max(0, selected) });
+}
+
+function validateChecklistSource(source: ChecklistSource): ChecklistSource {
+  const result = checklistSourceSchema.safeParse(source);
+  if (!result.success) throw new ChecklistUploadError(checklistUploadProblem(result.error, "read", source));
+  return result.data;
+}
+
+/** Workbooks can contain both an old and a revised checklist. Never silently
+ * turn the first recognised version into a lease when several are present. */
+export function checklistSheetChoices(source: ChecklistSource): { index: number; name: string }[] {
+  return source.sheets.flatMap((sheet, index) => looksLikeChecklist(sheet.rows) ? [{ index, name: sheet.name }] : []);
+}
+
+export function selectChecklistImportSheet(source: ChecklistSource, selectedIndex?: number): ChecklistSource {
+  const choices = checklistSheetChoices(source);
+  if (choices.length > 1 && selectedIndex === undefined) throw new Error("This workbook contains multiple checklists. Choose the worksheet to import.");
+  const index = selectedIndex ?? choices[0]?.index ?? source.importSheetIndex;
+  if (!Number.isInteger(index) || !source.sheets[index] || (choices.length > 0 && !choices.some((choice) => choice.index === index))) {
+    throw new Error("Choose a recognised checklist worksheet.");
+  }
+  return { ...source, importSheetIndex: index };
 }
 
 function stringifyCell(value: unknown): string {
@@ -131,7 +156,9 @@ function looksLikeChecklist(grid: Grid): boolean {
       key.includes("lessor") ||
       key.includes("landlord") ||
       key.includes("tenant") ||
-      key.includes("lessee")
+      key.includes("lessee") ||
+      key.includes("service provider") ||
+      key.includes("client's name")
     ) {
       return true;
     }

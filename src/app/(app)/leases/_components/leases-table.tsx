@@ -1,5 +1,7 @@
 "use client";
 
+import { needsChecklistReview } from "@/lib/checklist/review-status";
+
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useSubmission } from "@/hooks/use-submission";
@@ -882,7 +884,7 @@ function renderCell(key: ColumnKey, r: LeaseRow): React.ReactNode {
     case "end":
       return formatDate(l.endDate);
     case "status":
-      return <LeaseStatusBadge status={l.status} />;
+      return needsChecklistReview(l) ? <Badge variant="outline">Awaiting approval</Badge> : <LeaseStatusBadge status={l.status} />;
   }
 }
 

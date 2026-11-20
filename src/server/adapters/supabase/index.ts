@@ -1,4 +1,6 @@
 import "server-only";
+import { validateChecklistApproval } from "@/lib/checklist/review";
+import { checklistReviewVersion } from "@/server/checklist-review-version";
 import { readSavedChecklist } from "@/lib/checklist/source-schema";
 
 import {
@@ -178,11 +180,13 @@ async function loadLedgerEntry(id: string): Promise<LedgerEntry> {
 
 // Relational reads use lateral joins/JSON aggregation to return one row per
 // lease in one SQL statement, avoiding a round trip for each child table.
+// Project only workflow provenance, never the original workbook or raw fields.
+const importSummary = { importSummary: sql`jsonb_build_object('source', ${leaseTable.importMeta}->'source', 'review', ${leaseTable.importMeta}->'review')`.as("import_summary") };
 const leaseChildren = { tranches: true, partyRoles: true, units: true } as const;
-type LeaseJoinedRow = Omit<typeof leaseTable.$inferSelect, "importMeta"> & { importMeta?: unknown } & Omit<Parameters<typeof toLease>[0], "lease">;
+type LeaseJoinedRow = Omit<typeof leaseTable.$inferSelect, "importMeta"> & { importMeta?: unknown; importSummary?: unknown } & Omit<Parameters<typeof toLease>[0], "lease">;
 
 function mapLeaseRow(row: LeaseJoinedRow): Lease {
-  return toLease({ lease: { ...row, importMeta: row.importMeta ?? null }, tranches: row.tranches, partyRoles: row.partyRoles, units: row.units });
+  return toLease({ lease: { ...row, importMeta: row.importSummary ?? row.importMeta ?? null }, tranches: row.tranches, partyRoles: row.partyRoles, units: row.units });
 }
 
 function leaseWhere(filter?: LeaseListFilter) {
@@ -202,6 +206,44 @@ function leaseWhere(filter?: LeaseListFilter) {
 
 export const supabaseBackend: Backend = {
   leases: {
+    async approveChecklist(id, input) {
+      return db.transaction(async (tx) => {
+        const [locked] = await tx.select().from(leaseTable).where(and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt))).for("update");
+        if (!locked) throw new Error("Lease not found.");
+        const children = await loadLeaseChildren([id]);
+        const lease = toLease({ lease: locked, ...children });
+        const existing = await tx.select().from(ledgerEntryTable).where(eq(ledgerEntryTable.leaseId, id)).for("update");
+        const ledger = existing.map(toLedgerEntry);
+        if (checklistReviewVersion(lease, ledger) !== input.version) throw new Error("The lease or rent ledger changed. Close this dialog, review the latest values and try again.");
+        const rows = validateChecklistApproval(lease, ledger, input);
+        const receipts = new Map(input.receipts.map((receipt) => [receipt.dueDate, receipt]));
+        const inserts: Array<typeof ledgerEntryTable.$inferInsert> = [];
+        const updates: Array<{ id: string; paid_date: string; amount: number; method: string; reference: string }> = [];
+        for (const row of rows) {
+          const receipt = receipts.get(row.dueDate);
+          const paid = receipt ? { paidDate: receipt.paidDate, amountValue: String(receipt.amount), paymentMethod: receipt.paymentMethod, reference: receipt.reference || null, notes: "Historical rent recorded at checklist sign-off" } : {};
+          if (row.entryId) {
+            if (receipt) updates.push({ id: row.entryId, paid_date: receipt.paidDate, amount: receipt.amount, method: receipt.paymentMethod, reference: receipt.reference });
+          } else {
+            inserts.push({ leaseId: id, kind: "rent", direction: "in", counterpartyPartyId: lease.lesseePartyId, dueDate: row.dueDate, amountValue: String(row.amount.amount), amountCurrency: row.amount.currency, ...paid });
+          }
+        }
+        // One insert and one update even for years of historical collections.
+        if (inserts.length) await tx.insert(ledgerEntryTable).values(inserts);
+        if (updates.length) await tx.execute(sql`update ledger_entry as entry
+          set paid_date = receipt.paid_date, amount_value = receipt.amount,
+              payment_method = receipt.method::payment_method, reference = nullif(receipt.reference, ''),
+              notes = concat_ws(E'\n', nullif(entry.notes, ''), 'Historical rent recorded at checklist sign-off')
+          from jsonb_to_recordset(${JSON.stringify(updates)}::jsonb) as receipt(id uuid, paid_date date, amount numeric, method text, reference text)
+          where entry.id = receipt.id and entry.lease_id = ${id}`);
+        const review = { status: "approved", approvedAt: input.approvedAt, approvedById: input.approvedById, approvedByName: input.approvedByName, notes: input.notes, recordedPayments: input.receipts.length };
+        const [updated] = await tx.update(leaseTable).set({ status: "active", onboardingStage: null,
+          signedLeasePath: input.signedLeasePath, signedLeaseUploadedAt: lease.signedLeasePath === input.signedLeasePath ? locked.signedLeaseUploadedAt : new Date(input.approvedAt),
+          importMeta: sql`jsonb_set(${leaseTable.importMeta}, '{review}', ${JSON.stringify(review)}::jsonb, true)`, updatedAt: new Date(input.approvedAt),
+        }).where(eq(leaseTable.id, id)).returning();
+        return toLease({ lease: updated, ...children });
+      });
+    },
     async getChecklist(id) {
       const [row] = await db.select({ checklist: sql<unknown>`${leaseTable.importMeta}->'checklist'` })
         .from(leaseTable).where(and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt))).limit(1);
@@ -215,7 +257,7 @@ export const supabaseBackend: Backend = {
     },
     async list(filter): Promise<Lease[]> {
       const rows = await db.query.lease.findMany({
-        columns: { importMeta: false },
+        columns: { importMeta: false }, extras: importSummary,
         where: leaseWhere(filter),
         orderBy: desc(leaseTable.startDate),
         with: leaseChildren,
@@ -227,7 +269,7 @@ export const supabaseBackend: Backend = {
       // One statement includes the table's labels and just the next unpaid
       // incoming rent line per lease, rather than the complete rent ledger.
       const rows = await db.query.lease.findMany({
-        columns: { importMeta: false },
+        columns: { importMeta: false }, extras: importSummary,
         where: leaseWhere(filter),
         orderBy: desc(leaseTable.startDate),
         with: {
@@ -258,7 +300,7 @@ export const supabaseBackend: Backend = {
 
     async get(id): Promise<Lease | null> {
       const row = await db.query.lease.findFirst({
-        columns: { importMeta: false },
+        columns: { importMeta: false }, extras: importSummary,
         where: and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt)),
         with: leaseChildren,
       });
@@ -267,7 +309,7 @@ export const supabaseBackend: Backend = {
 
     async getDetails(id): Promise<LeaseDetails | null> {
       const row = await db.query.lease.findFirst({
-        columns: { importMeta: false },
+        columns: { importMeta: false }, extras: importSummary,
         where: and(eq(leaseTable.id, id), isNull(leaseTable.deletedAt)),
         with: {
           ...leaseChildren,
@@ -277,9 +319,9 @@ export const supabaseBackend: Backend = {
           partyRoles: { with: { party: true } },
           obligations: { orderBy: (entry) => asc(entry.dueDate) },
           ledger: { orderBy: (entry) => asc(entry.dueDate) },
-          parent: { columns: { importMeta: false }, with: { ...leaseChildren, lessee: true } },
+          parent: { columns: { importMeta: false }, extras: importSummary, with: { ...leaseChildren, lessee: true } },
           children: {
-            columns: { importMeta: false },
+            columns: { importMeta: false }, extras: importSummary,
             where: (child) => isNull(child.deletedAt),
             orderBy: (child) => desc(child.startDate),
             with: { ...leaseChildren, lessee: true },
@@ -517,6 +559,7 @@ export const supabaseBackend: Backend = {
       trancheId,
       patch: TrancheUpdateInput,
     ): Promise<Lease> {
+      await db.execute(sql`select id from lease where id = ${leaseId} for update`);
       const [lease] = await db
         .select({ id: leaseTable.id })
         .from(leaseTable)

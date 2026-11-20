@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
+import { userErrorMessage } from "@/lib/user-error";
 
 /** Lock before React renders; keep navigation locked until the page changes. */
 export function useSubmission() {
@@ -19,7 +20,7 @@ export function useSubmission() {
     } catch (error) {
       retained.current = false;
       toast.error("Could not complete the request", {
-        description: error instanceof Error ? error.message : "Please try again.",
+        description: userErrorMessage(error),
       });
     } finally {
       if (!retained.current) {

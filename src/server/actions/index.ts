@@ -1,5 +1,7 @@
 "use server";
 
+import { userErrorMessage } from "@/lib/user-error";
+import { assertChecklistReviewed } from "@/lib/checklist/review-status";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { z } from "zod";
@@ -82,12 +84,9 @@ export type ActionResult<T> =
   | { ok: false; error: string };
 
 function fail(e: unknown): { ok: false; error: string } {
-  const msg = e instanceof Error ? e.message : String(e);
-  let cleaned = msg;
-  if (e instanceof Error && "cause" in e && e.cause instanceof Error) {
-    cleaned = e.cause.message || msg;
-  }
-  return { ok: false, error: cleaned };
+  const error = userErrorMessage(e);
+  if (!(e instanceof Error) || error !== e.message) console.error("Request failed", e);
+  return { ok: false, error };
 }
 
 async function requireLedgerAccess(ledgerEntryId: string): Promise<void> {
@@ -663,6 +662,9 @@ export async function generateLeaseAgreementAction(
   try {
     z.string().uuid().parse(leaseId);
     await requireLeaseAccess(leaseId, "leases:write");
+    const reviewLease = await getBackend().leases.get(leaseId);
+    if (!reviewLease) throw new Error("Lease not found.");
+    assertChecklistReviewed(reviewLease);
 
     const backend = getBackend();
     const lease = await backend.leases.get(leaseId);
@@ -719,6 +721,9 @@ export async function uploadLeaseAgreementAction(
   try {
     z.string().uuid().parse(leaseId);
     await requireLeaseAccess(leaseId, "leases:write");
+    const reviewLease = await getBackend().leases.get(leaseId);
+    if (!reviewLease) throw new Error("Lease not found.");
+    assertChecklistReviewed(reviewLease);
     const file = formData.get("file");
     if (!(file instanceof File)) throw new Error("No file provided.");
     if (file.size === 0) throw new Error("Uploaded file is empty.");
@@ -783,6 +788,9 @@ export async function sendLeaseEmailAction(
   try {
     z.string().uuid().parse(leaseId);
     const user = await requireLeaseAccess(leaseId, "leases:write");
+    const reviewLease = await getBackend().leases.get(leaseId);
+    if (!reviewLease) throw new Error("Lease not found.");
+    assertChecklistReviewed(reviewLease);
     if (kind !== "lawyer" && kind !== "advisor" && kind !== "accounts") {
       throw new Error(`Invalid email kind: ${kind}`);
     }
@@ -1002,6 +1010,9 @@ export async function uploadSignedLeaseAction(
   try {
     z.string().uuid().parse(leaseId);
     const user = await requireLeaseAccess(leaseId, "leases:write");
+    const reviewLease = await getBackend().leases.get(leaseId);
+    if (!reviewLease) throw new Error("Lease not found.");
+    assertChecklistReviewed(reviewLease);
     const file = formData.get("file");
     if (!(file instanceof File)) {
       throw new Error("No file provided.");

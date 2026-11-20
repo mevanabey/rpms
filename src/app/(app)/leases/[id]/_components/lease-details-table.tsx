@@ -1,3 +1,4 @@
+import { needsChecklistReview } from "@/lib/checklist/review-status";
 /**
  * Compact "details view" — a two-column list of every captured field on a
  * lease, mirroring the firm's intake checklist.
@@ -377,7 +378,7 @@ export function LeaseDetailsTable({
     // ── Lease body
     {
       label: "Status",
-      value: editable(
+      value: needsChecklistReview(lease) ? "Awaiting checklist approval" : editable(
         "Status",
         {
           control: { kind: "select", value: lease.status, options: statusOptions },

@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { randomUUID } from "node:crypto";
+import { ChecklistUploadError, checklistUploadProblem, unrecognisedChecklist, type ChecklistUploadProblem } from "@/lib/checklist/upload-errors";
 
 import {
   buildChecklistIntake,
@@ -8,7 +10,7 @@ import {
 } from "@/lib/checklist/build-lease";
 import { importChecklistToBackend } from "@/lib/checklist/import";
 import type { ScheduleBlock } from "@/lib/checklist/parse";
-import { extractChecklist } from "@/lib/checklist/parse";
+import { extractChecklist, selectChecklistImportSheet } from "@/lib/checklist/parse";
 import { checklistSourceSchema } from "@/lib/checklist/source-schema";
 import type { ChecklistSource } from "@/core/checklists";
 import type { ChecklistImportResult } from "@/lib/checklist/result";
@@ -19,6 +21,8 @@ import type { AppUser } from "@/lib/demo/identity";
 
 export interface ChecklistInput {
   source?: ChecklistSource;
+  /** Explicit choice when a workbook contains multiple checklist versions. */
+  sheetIndex?: number;
   fields?: ChecklistFields;
   schedules?: ScheduleBlock[];
   unknown?: Array<{ key: string; value: string }>;
@@ -29,39 +33,42 @@ export interface ChecklistInput {
  * to the active backend (`getBackend()` — supabase in Phase 02), then
  * revalidate the affected routes.
  */
-export async function importChecklist(input: ChecklistInput): Promise<ChecklistImportResult> {
-  const actor = await requireResource("checklists:manage");
-  const result = await importOne(input, actor);
-  await revalidateBackend();
-  return result;
+type ImportOutcome = { ok: true; data: ChecklistImportResult } | { ok: false; problem: ChecklistUploadProblem };
+
+export async function importChecklist(input: ChecklistInput): Promise<ImportOutcome> {
+  let phase: "prepare" | "save" = "prepare";
+  try {
+    const actor = await requireResource("checklists:manage");
+    const result = await importOne(input, actor, () => { phase = "save"; });
+    // A refresh failure must not turn a successfully saved import into a retry.
+    try { await revalidateBackend(); } catch (error) { console.error("Checklist refresh failed", error); }
+    return { ok: true, data: result };
+  } catch (error) {
+    const reference = `CHK-${randomUUID().slice(0, 8).toUpperCase()}`;
+    console.error(`Checklist import ${reference} (${phase})`, error);
+    return { ok: false, problem: { ...checklistUploadProblem(error, phase, input.source), reference } };
+  }
 }
 
 /**
  * Batch path used by the bulk uploader. Imports each file in order, collects
- * per-file results, revalidates once at the end.
+ * per-file results with the same recovery guidance as single-file uploads.
  */
-export async function importChecklistBatch(inputs: ChecklistInput[]): Promise<{
-  results: Array<{ ok: true; data: ChecklistImportResult } | { ok: false; error: string }>;
-}> {
-  const actor = await requireResource("checklists:manage");
-  const results: Array<{ ok: true; data: ChecklistImportResult } | { ok: false; error: string }> = [];
+export async function importChecklistBatch(inputs: ChecklistInput[]): Promise<{ results: ImportOutcome[] }> {
+  const results: ImportOutcome[] = [];
   for (const input of inputs) {
-    try {
-      results.push({ ok: true, data: await importOne(input, actor) });
-    } catch (err) {
-      results.push({ ok: false, error: err instanceof Error ? err.message : "Import failed" });
-    }
+    results.push(await importChecklist(input));
   }
-  await revalidateBackend();
   return { results };
 }
 
-async function importOne(input: ChecklistInput, actor: AppUser): Promise<ChecklistImportResult> {
+async function importOne(input: ChecklistInput, actor: AppUser, beforeSave: () => void): Promise<ChecklistImportResult> {
   if (input.source) {
-    const source = checklistSourceSchema.parse(input.source);
+    const source = selectChecklistImportSheet(checklistSourceSchema.parse(input.source), input.sheetIndex);
     const extracted = extractChecklist(source.sheets[source.importSheetIndex].rows);
-    if (!Object.keys(extracted.fields).length) throw new Error("No recognised checklist fields found.");
+    if (!Object.keys(extracted.fields).length) throw new ChecklistUploadError(unrecognisedChecklist());
     const intake = buildChecklistIntake({ ...extracted, source });
+    beforeSave();
     return withAudit(actor, "Checklist imported", () => importChecklistToBackend(getBackend(), intake), { source: "checklist-upload" });
   }
   // `ChecklistFields` has optional keys; the raw extractor types `fields` as
@@ -76,6 +83,7 @@ async function importOne(input: ChecklistInput, actor: AppUser): Promise<Checkli
     unknown: input.unknown ?? [],
     schedules: input.schedules ?? [],
   });
+  beforeSave();
   return withAudit(actor, "Checklist imported", () => importChecklistToBackend(getBackend(), intake), {
     source: "checklist-upload",
   });

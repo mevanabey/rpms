@@ -1,6 +1,8 @@
 "use client";
 
 import { useSubmission } from "@/hooks/use-submission";
+import { checklistUploadProblem, unsupportedChecklist, unrecognisedChecklist, type ChecklistUploadProblem } from "@/lib/checklist/upload-errors";
+import { ChecklistUploadErrorPanel } from "@/components/checklist/upload-error-panel";
 
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -29,6 +31,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -43,6 +46,8 @@ import {
   type ExtractedChecklist,
   extractChecklist,
   parseChecklistSource,
+  checklistSheetChoices,
+  selectChecklistImportSheet,
 } from "@/lib/checklist/parse";
 import { useDemoStore } from "@/lib/demo/store";
 import { useCurrentUser } from "@/lib/demo/use-store";
@@ -53,15 +58,17 @@ import { importChecklist } from "./actions";
 type RowStatus =
   | { kind: "queued" }
   | { kind: "parsing" }
+  | { kind: "choose_sheet"; extracted: ExtractedChecklist }
   | { kind: "parsed"; extracted: ExtractedChecklist }
   | { kind: "importing"; extracted: ExtractedChecklist }
   | { kind: "done"; extracted: ExtractedChecklist; result: ChecklistImportResult }
-  | { kind: "error"; error: string; extracted?: ExtractedChecklist };
+  | { kind: "error"; problem: ChecklistUploadProblem; extracted?: ExtractedChecklist };
 
 interface FileRow {
   id: string;
   file: File;
   status: RowStatus;
+  sheetIndex?: number;
 }
 
 const ACCEPT =
@@ -77,6 +84,8 @@ export default function ChecklistUploadPage() {
   const [files, setFiles] = useState<FileRow[]>([]);
   const { pending: isRunning, run: startRun } = useSubmission();
   const inputRef = useRef<HTMLInputElement>(null);
+  const replacementRef = useRef<HTMLInputElement>(null);
+  const replacementId = useRef<string | null>(null);
 
   const addFiles = (incoming: FileList | File[] | null) => {
     if (!incoming) return;
@@ -90,7 +99,7 @@ export default function ChecklistUploadPage() {
           next.push({
             id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2, 6)}`,
             file,
-            status: { kind: "error", error: `Unsupported file type .${ext}` },
+            status: { kind: "error", problem: unsupportedChecklist() },
           });
           continue;
         }
@@ -114,11 +123,13 @@ export default function ChecklistUploadPage() {
   const clearAll = () => setFiles([]);
 
   const parseRow = async (row: FileRow): Promise<ExtractedChecklist> => {
-    const source = parseChecklistSource(await row.file.arrayBuffer(), row.file.name);
-    return { ...extractChecklist(source.sheets[source.importSheetIndex].rows), source };
+    const cached = "extracted" in row.status ? row.status.extracted?.source : undefined;
+    const source = cached ?? parseChecklistSource(await row.file.arrayBuffer(), row.file.name);
+    const selected = row.sheetIndex === undefined ? source : selectChecklistImportSheet(source, row.sheetIndex);
+    return { ...extractChecklist(selected.sheets[selected.importSheetIndex].rows), source: selected };
   };
 
-  const importRow = async (row: FileRow): Promise<void> => {
+  const importRow = async (row: FileRow): Promise<"choose_sheet" | "done" | "error"> => {
     updateRow(row.id, (r) => ({ ...r, status: { kind: "parsing" } }));
     let extracted: ExtractedChecklist;
     try {
@@ -126,40 +137,52 @@ export default function ChecklistUploadPage() {
     } catch (err) {
       updateRow(row.id, () => ({
         ...row,
-        status: { kind: "error", error: err instanceof Error ? err.message : "Parse failed" },
+        status: { kind: "error", problem: checklistUploadProblem(err, "read") },
       }));
-      return;
+      return "error";
+    }
+    if (extracted.source && checklistSheetChoices(extracted.source).length > 1 && row.sheetIndex === undefined) {
+      updateRow(row.id, (r) => ({ ...r, status: { kind: "choose_sheet", extracted } }));
+      return "choose_sheet";
     }
     if (Object.keys(extracted.fields).length === 0) {
       updateRow(row.id, () => ({
         ...row,
-        status: { kind: "error", extracted, error: "No recognised fields" },
+        status: { kind: "error", extracted, problem: unrecognisedChecklist() },
       }));
-      return;
+      return "error";
     }
     updateRow(row.id, () => ({ ...row, status: { kind: "importing", extracted } }));
     try {
-      const result = await importChecklist({
+      const outcome = await importChecklist({
         source: extracted.source,
+        sheetIndex: row.sheetIndex,
       });
+      if (!outcome.ok) {
+        updateRow(row.id, () => ({ ...row, status: { kind: "error", extracted, problem: outcome.problem } }));
+        return "error";
+      }
+      const result = outcome.data;
       updateRow(row.id, () => ({ ...row, status: { kind: "done", extracted, result } }));
-      pushActivity({
+      try { pushActivity({
         workflow: "onboard-tenant",
         severity: "info",
         title: "Checklist imported",
         body: `${row.file.name} → draft ${result.leaseId.slice(-6)} for ${result.lesseeName} · ${result.tranches} tranche${result.tranches === 1 ? "" : "s"}${
           result.hasSubLease ? " · paired sub-lease created" : ""
         }${user?.name ? ` (by ${user.name})` : ""}.`,
-      });
+      }); } catch { /* Activity display must not change a saved import into an error. */ }
+      return "done";
     } catch (err) {
       updateRow(row.id, () => ({
         ...row,
         status: {
           kind: "error",
           extracted,
-          error: err instanceof Error ? err.message : "Import failed",
+          problem: checklistUploadProblem(err, "save"),
         },
       }));
+      return "error";
     }
   };
 
@@ -171,12 +194,13 @@ export default function ChecklistUploadPage() {
         return;
       }
       // Concurrency-limited worker pool.
+      const completed = { choose_sheet: 0, done: 0, error: 0 };
       const pool: Promise<void>[] = [];
       const iter = queue[Symbol.iterator]();
       const next = async () => {
         const item = iter.next();
         if (item.done) return;
-        await importRow(item.value);
+        completed[await importRow(item.value)]++;
         await next();
       };
       for (let i = 0; i < Math.min(CONCURRENCY, queue.length); i++) {
@@ -184,12 +208,14 @@ export default function ChecklistUploadPage() {
       }
       await Promise.all(pool);
       router.refresh();
-      toast.success(`Processed ${queue.length} file${queue.length === 1 ? "" : "s"}`);
+      if (completed.error) toast.error(`${completed.done} imported · ${completed.error} need attention`, { description: "Follow the instructions beside each affected file. Successful imports are already saved." });
+      else if (completed.done) toast.success(`Imported ${completed.done} file${completed.done === 1 ? "" : "s"}`);
+      if (completed.choose_sheet) toast.info("Choose a worksheet for the files awaiting selection, then click Import again.");
     });
   };
 
   const summary = useMemo(() => {
-    const tally = { queued: 0, parsing: 0, parsed: 0, importing: 0, done: 0, error: 0 };
+    const tally = { queued: 0, choose_sheet: 0, parsing: 0, parsed: 0, importing: 0, done: 0, error: 0 };
     let tranches = 0;
     let subLeases = 0;
     let createdEntities = 0;
@@ -223,15 +249,9 @@ export default function ChecklistUploadPage() {
         <div>
           <h1 className="font-bold text-2xl tracking-tight">Checklist upload</h1>
           <p className="mt-1 text-muted-foreground text-sm">
-            Each file becomes
-            a draft lease or service agreement (parties and premises matched by name).
-            Multi-tranche rent schedules are read directly
-            from the schedule table; checklists with a sub-tenancy block create
-            a paired sub-lease. Anything we can&apos;t parse is logged per row.
-            Accepts <code className="font-mono text-xs">.xlsx</code>,{" "}
-            <code className="font-mono text-xs">.xls</code>,{" "}
-            <code className="font-mono text-xs">.ods</code> and{" "}
-            <code className="font-mono text-xs">.csv</code>.
+            Upload a checklist to create a draft lease or service agreement for review and approval.
+            Use an Excel (.xlsx or .xls), OpenDocument (.ods) or CSV (.csv) file, up to 10 MB each.
+            If a workbook has more than one checklist, we’ll ask you which worksheet to use.
           </p>
           <p className="mt-2 text-muted-foreground text-sm">
             Open an imported agreement to edit its checklist details or delete it.
@@ -239,6 +259,16 @@ export default function ChecklistUploadPage() {
           </p>
         </div>
 
+        <input ref={inputRef} type="file" accept={ACCEPT} multiple disabled={isRunning} className="hidden" aria-label="Checklist files" onChange={(e) => addFiles(e.target.files)} />
+        <input ref={replacementRef} type="file" accept={ACCEPT} className="hidden" aria-label="Corrected checklist file" onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          const id = replacementId.current;
+          replacementId.current = null;
+          if (!file || !id) return;
+          updateRow(id, (row) => ({ ...row, file, sheetIndex: undefined, status: /\.(csv|xlsx|xls|ods)$/i.test(file.name)
+            ? { kind: "queued" } : { kind: "error", problem: unsupportedChecklist() } }));
+        }} />
         {!hasResults && (
           <Card
             className="border-dashed"
@@ -259,9 +289,9 @@ export default function ChecklistUploadPage() {
                   <div className="max-w-md">
                     <CardTitle className="text-base">Uploading…</CardTitle>
                     <CardDescription className="mt-1">
-                      Parsing and importing {inFlightCount}{" "}
+                      Reading and saving {inFlightCount}{" "}
                       {inFlightCount === 1 ? "file" : "files"}. Keep this tab
-                      open until the table below settles.
+                      open until all files have finished.
                     </CardDescription>
                   </div>
                 </>
@@ -273,18 +303,11 @@ export default function ChecklistUploadPage() {
                       Drop one or many checklists here
                     </CardTitle>
                     <CardDescription className="mt-1">
-                      Files are parsed in your browser. Imports run in batches
-                      of {CONCURRENCY} against the backend.
+                      Choose your files, then click Import. If a file needs a correction,
+                      we’ll show you what to change and how to upload it again.
                     </CardDescription>
                   </div>
-                  <input
-                    ref={inputRef}
-                    type="file"
-                    accept={ACCEPT}
-                    multiple
-                    className="hidden"
-                    onChange={(e) => addFiles(e.target.files)}
-                  />
+
                   <div className="flex flex-wrap items-center justify-center gap-2">
                     <Button
                       variant="outline"
@@ -324,7 +347,7 @@ export default function ChecklistUploadPage() {
                 tone="emerald"
               />
               <SummaryTile
-                label="Errors"
+                label="Need attention"
                 value={summary.tally.error}
                 tone={summary.tally.error > 0 ? "rose" : undefined}
               />
@@ -352,6 +375,15 @@ export default function ChecklistUploadPage() {
                       <FileStatusRow
                         key={row.id}
                         row={row}
+                        disabled={isRunning}
+                        onSheetChange={(sheetIndex) => updateRow(row.id, (current) => {
+                          const source = "extracted" in current.status ? current.status.extracted?.source : undefined;
+                          if (!source) return current;
+                          const selected = selectChecklistImportSheet(source, sheetIndex);
+                          return { ...current, sheetIndex, status: { kind: "parsed", extracted: { ...extractChecklist(selected.sheets[sheetIndex].rows), source: selected } } };
+                        })}
+                        onReplace={() => { replacementId.current = row.id; replacementRef.current?.click(); }}
+                        onRetry={() => { void startRun(async () => { const outcome = await importRow(row); router.refresh(); if (outcome === "done") toast.success("Checklist imported"); }); }}
                         onRemove={() => removeRow(row.id)}
                       />
                     ))}
@@ -362,7 +394,7 @@ export default function ChecklistUploadPage() {
 
             <div className="flex flex-wrap items-center justify-end gap-2">
               {hasResults && (
-                <Button variant="outline" size="sm" onClick={clearAll}>
+                <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
                   <Plus className="size-3.5" />
                   Upload more
                 </Button>
@@ -383,9 +415,10 @@ export default function ChecklistUploadPage() {
   );
 }
 
-function FileStatusRow({ row, onRemove }: { row: FileRow; onRemove: () => void }) {
+function FileStatusRow({ row, onRemove, onSheetChange, onReplace, onRetry, disabled }: { row: FileRow; onRemove: () => void; onSheetChange: (index: number) => void; onReplace: () => void; onRetry: () => void; disabled: boolean }) {
   const extracted =
     row.status.kind === "parsed" ||
+    row.status.kind === "choose_sheet" ||
     row.status.kind === "importing" ||
     row.status.kind === "done" ||
     (row.status.kind === "error" && row.status.extracted)
@@ -402,18 +435,26 @@ function FileStatusRow({ row, onRemove }: { row: FileRow; onRemove: () => void }
       </TableCell>
       <TableCell>
         <StatusBadge status={row.status} />
+        {extracted?.source && ["choose_sheet", "parsed"].includes(row.status.kind) && checklistSheetChoices(extracted.source).length > 1 && <div className="mt-2 space-y-1">
+          <p className="text-xs text-muted-foreground">Multiple checklist versions found. Choose one for the lease fields; all worksheets will be preserved.</p>
+          <NativeSelect aria-label={`Checklist worksheet for ${row.file.name}`} value={row.sheetIndex ?? ""} disabled={disabled} onChange={(event) => onSheetChange(Number(event.target.value))}>
+            <NativeSelectOption value="" disabled>Choose worksheet…</NativeSelectOption>
+            {checklistSheetChoices(extracted.source).map((sheet) => <NativeSelectOption key={sheet.index} value={sheet.index}>{sheet.name}</NativeSelectOption>)}
+          </NativeSelect>
+        </div>}
+        {row.status.kind === "done" && extracted?.source && <p className="mt-1 text-xs text-muted-foreground">Imported from {extracted.source.sheets[extracted.source.importSheetIndex].name}</p>}
+
         {row.status.kind === "done" && row.status.result.warnings.length > 0 && (
           <div className="mt-1 flex items-start gap-1 text-amber-700 text-xs dark:text-amber-300">
             <AlertTriangle className="mt-0.5 size-3 shrink-0" />
-            <span className="text-[11px]">
-              {row.status.result.warnings.join(" · ")}
-            </span>
+            <div className="max-w-xl whitespace-normal">
+              <p className="font-medium">Imported — check these details before approval</p>
+              <ul className="mt-1 list-disc space-y-1 pl-4">{row.status.result.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+            </div>
           </div>
         )}
         {row.status.kind === "error" && (
-          <div className="mt-1 text-rose-700 text-xs dark:text-rose-300">
-            {row.status.error}
-          </div>
+          <ChecklistUploadErrorPanel problem={row.status.problem} disabled={disabled} onReplace={onReplace} onRetry={onRetry} />
         )}
       </TableCell>
       <TableCell className="text-xs">
@@ -447,7 +488,7 @@ function FileStatusRow({ row, onRemove }: { row: FileRow; onRemove: () => void }
               {row.status.result.lesseeName}
             </Link>
             <span className="text-muted-foreground">
-              {row.status.result.propertyName} · {row.status.result.tranches} tranche
+              {row.status.result.propertyName} · {row.status.result.tranches} rent period
               {row.status.result.tranches === 1 ? "" : "s"}
             </span>
             {row.status.result.subLeaseId && (
@@ -468,6 +509,7 @@ function FileStatusRow({ row, onRemove }: { row: FileRow; onRemove: () => void }
           variant="ghost"
           size="icon-sm"
           onClick={onRemove}
+          disabled={disabled}
           aria-label={`Remove ${row.file.name}`}
         >
           <Trash2 className="size-3.5" />
@@ -482,9 +524,11 @@ function StatusBadge({ status }: { status: RowStatus }) {
     case "queued":
       return <Badge variant="outline">Queued</Badge>;
     case "parsing":
-      return <Badge variant="outline">Parsing…</Badge>;
+      return <Badge variant="outline">Reading file…</Badge>;
+    case "choose_sheet":
+      return <Badge variant="outline">Choose worksheet</Badge>;
     case "parsed":
-      return <Badge variant="outline">Parsed</Badge>;
+      return <Badge variant="outline">Ready to import</Badge>;
     case "importing":
       return <Badge variant="outline">Importing…</Badge>;
     case "done":
@@ -499,7 +543,7 @@ function StatusBadge({ status }: { status: RowStatus }) {
           variant="outline"
           className="border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-200"
         >
-          <XCircle className="size-3" /> Error
+          <XCircle className="size-3" /> Needs attention
         </Badge>
       );
   }

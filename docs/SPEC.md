@@ -136,10 +136,22 @@ The same platform handles two materially different operations. Both share entiti
 ### 4d. Original checklist view
 
 - Lease detail offers List View, Card View and Checklist View, with the selected view remembered in the browser. New imports retain all worksheets, original displayed cell values, row/column order, blank rows and merged cells. Workbook styling and formula recalculation are not reproduced.
+- Source worksheets support up to 2,000 rows and 256 columns, subject to the overall snapshot size limit. When multiple worksheets contain checklist versions, the uploader requires an explicit worksheet choice before importing; all other sheets remain preserved as source.
 - Checklist View loads its saved source only when opened. A discreet Show mapping control reveals each row’s parsed field destinations, duplicate or unused values and unmatched content. Source and mapping evidence remain unchanged by later agreement edits.
 - Older imports can attach their original file without reimporting or changing agreement data. Their mapping details are explicitly a current-parser preview, since the historical mapping cannot be recovered from the original alone.
 - A source containing paired agreements requires access to both agreements. Original cells are excluded from normal lease and audit-history read payloads.
 - The Leases & agreements list includes an agreement-type filter. Existing records with no explicit type are treated as leases for filtering.
+
+Checklist upload failures stay beside the affected file with a plain-language explanation, correction steps and a relevant recovery action. Replacing a failed file or adding more files preserves successful rows. Expected errors return structured results so production server error redaction does not hide the guidance; unexpected server failures include a help reference for administrators. A failure after saving starts asks users to check Leases before reuploading because the import may be partially or fully saved. File corrections, permission failures and sign-in expiry are distinguished. Successful imports with missing details show separate review reminders.
+
+### 4e. Checklist review and sign-off
+
+- Checklist uploads create drafts awaiting review. Only `importMeta.source = checklist-upload` uses this flow; New Lease and manually attached originals retain the normal workflow.
+- Imported leases show a review panel instead of Lease progress. Reviewers inspect the original checklist and mapped values, then use Approve & activate to attach an executed agreement, enter historical collections by rent period, confirm their review and sign off.
+- Approval requires lease editing access. Adding collected rent additionally requires payment-write access. Sign-off records the verified reviewer, timestamp and notes; paired leases are approved separately, with source access checked for both.
+- Existing paid rent is preserved. New collections require explicit dates, amounts and currencies; unselected rent stays unpaid. Activation, sign-off and ledger changes commit together. Concurrent/stale reviews and repeated approvals are rejected.
+- Existing checklist imports without sign-off also await review; their legal status and existing payments are not silently reset. If the original was not saved, attach it before sign-off. Closed leases cannot be reactivated by this flow.
+- Standard activation, status promotion and onboarding actions cannot bypass pending review. After sign-off, the normal rent ledger and signed agreement remain available, without the new-lease onboarding stepper.
 
 ## 5. Domain model
 

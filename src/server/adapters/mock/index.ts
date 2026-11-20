@@ -1,3 +1,5 @@
+import { validateChecklistApproval } from "@/lib/checklist/review";
+import { checklistReviewVersion } from "@/server/checklist-review-version";
 import type { Backend } from "@/core/services";
 import type { SavedChecklist } from "@/core/checklists";
 import type {
@@ -53,6 +55,29 @@ function addMonthsIsoMock(iso: string, months: number): string {
 
 export const mockBackend: Backend = {
   leases: {
+    async approveChecklist(id, input) {
+      const lease = state.leases.find((l) => l.id === id && !state.deletedLeaseIds.has(id));
+      if (!lease) throw new Error("Lease not found.");
+      const ledger = state.ledger.filter((e) => e.leaseId === id);
+      if (checklistReviewVersion(lease, ledger) !== input.version) throw new Error("The lease or rent ledger changed. Review the latest values.");
+      const rows = validateChecklistApproval(lease, ledger, input);
+      const receipts = new Map(input.receipts.map((r) => [r.dueDate, r]));
+      for (const row of rows) {
+        let entry = row.entryId ? state.ledger.find((e) => e.id === row.entryId)! : undefined;
+        if (!entry) {
+          entry = { id: mockId("ledger"), leaseId: id, kind: "rent", direction: "in", counterpartyPartyId: lease.lesseePartyId, dueDate: row.dueDate, amount: { ...row.amount } };
+          state.ledger.push(entry);
+        }
+        const receipt = receipts.get(row.dueDate);
+        if (receipt) Object.assign(entry, { paidDate: receipt.paidDate, amount: { amount: receipt.amount, currency: receipt.currency }, paymentMethod: receipt.paymentMethod, reference: receipt.reference, notes: [entry.notes, "Historical rent recorded at checklist sign-off"].filter(Boolean).join("\n") });
+      }
+      lease.status = "active";
+      lease.onboardingStage = undefined;
+      lease.signedLeasePath = input.signedLeasePath;
+      lease.signedLeaseUploadedAt = input.approvedAt;
+      lease.importMeta = { ...lease.importMeta, review: { status: "approved", approvedAt: input.approvedAt, approvedById: input.approvedById, approvedByName: input.approvedByName, notes: input.notes, recordedPayments: input.receipts.length } };
+      return lease;
+    },
     async getChecklist(id) {
       if (!await mockBackend.leases.get(id)) return null;
       return structuredClone(state.checklists.get(id) ?? null);
